@@ -1,0 +1,19 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "model": "opusplan",
+  "permissions": {
+    "allow": [
+      "Bash(tmux ls:*)",
+      "Bash(tmux list-sessions:*)",
+      "Bash(tmux list-windows:*)",
+      "Bash(tmux list-panes:*)",
+      "Bash(tmux kill-pane:*)",
+      "Bash(python3 -m venv venv)",
+      "Bash(kill 40161:*)"
+    ]
+  },
+  "teammateMode": "tmux",
+  "dangerouslySkipPermissions": true
+}

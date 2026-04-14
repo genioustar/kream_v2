@@ -10,22 +10,31 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 
 ## Current Phase
 
-**Phase:** 없음 (아직 시작 전)
-**Status:** Ready to plan
+**Phase:** 1 — 나이키 공홈 크롤러 추가
+**Status:** Planned — 실행 대기 중
 
-다음 명령으로 시작: `/gsd:plan-phase 1`
+다음 명령으로 실행 시작: `/gsd:execute-phase 1`
 
 ## Milestone Progress
 
 | Phase | Title | Status |
 |-------|-------|--------|
-| 1 | 새 쇼핑몰 크롤러 추가 | Pending |
+| 1 | 나이키 공홈 크롤러 추가 | Planned (2 plans ready) |
 | 2 | 안정성 및 버그 수정 | Pending |
 | 3 | 성능 개선 | Pending |
-| 4 | 알림 기능 | Pending |
+| 4 | 텔레그램 알림 | Pending |
+
+## Phase 1 Plans
+
+| Plan | Title | Wave | Status |
+|------|-------|------|--------|
+| 01-01 | nike/crawler.py 구현 | 1 | Ready |
+| 01-02 | main.py 통합 및 문서 업데이트 | 2 | Ready (depends on 01-01) |
 
 ## Recent Activity
 
+- 2026-04-14: Phase 1 플랜 완료 (PASS 86/100) — 실행 대기 중
+- 2026-04-13: Phase 1 리서치 완료, PLAN.md 2개 작성
 - 2026-04-13: GSD 초기화 완료 (PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md 생성)
 - 2026-04-13: Git 초기화 및 초기 커밋 (마일스톤 1 완료 상태)
 

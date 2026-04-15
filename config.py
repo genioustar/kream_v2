@@ -8,3 +8,4 @@ MIN_TRADE_COUNT = 100
 MIN_PRICE_DIFF = 10000
 KREAM_MAX_CONCURRENCY = 2
 OUTPUT_DIR = "output"
+NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"

@@ -33,11 +33,13 @@ SITE_NAME               = "nike"
 PAGE_LOAD_TIMEOUT_MS    = 60_000
 SELECTOR_TIMEOUT_MS     = 15_000
 PAGE_SETTLE_SEC         = 3.0
-SCROLL_PAUSE_MS         = 2_000
+SCROLL_PAUSE_MS         = 3_500   # 나이키 배치 로딩 대기 (2000에서 상향)
 NETWORK_IDLE_TIMEOUT_MS = 3_000
-MAX_SCROLL_ATTEMPTS     = 40
-NO_CHANGE_LIMIT         = 3       # N회 연속 카드 수 변화 없으면 스크롤 종료
+MAX_SCROLL_ATTEMPTS     = 60
+NO_CHANGE_LIMIT         = 4       # N회 연속 카드 수 변화 없으면 스크롤 종료
 DIAG_BODY_TEXT_LEN      = 500     # 셀렉터 실패 시 진단용 본문 출력 길이
+TARGET_PRODUCT_COUNT    = 100     # 목표 수집 상품 수
+SCROLL_BUFFER_RATIO     = 1.4     # 필터링 여유분 (Kids 제외 등 고려)
 
 # 상품 카드 셀렉터 후보 (앞에서부터 시도) - RESEARCH.md 의 셀렉터 안정성 권고 반영
 CARD_SELECTORS: list[str] = [
@@ -118,14 +120,23 @@ async def _find_card_selector(page: Page) -> str | None:
     return None
 
 
-async def _scroll_to_bottom(page: Page, card_selector: str) -> int:
+async def _scroll_to_bottom(
+    page: Page,
+    card_selector: str,
+    target_count: int = TARGET_PRODUCT_COUNT,
+) -> int:
     """
-    페이지를 끝까지 스크롤하며 새 상품이 더 이상 로드되지 않으면 중단한다.
-    naver/crawler.py 의 _scroll_to_bottom 패턴을 따른다.
+    페이지를 스크롤하며 상품 카드를 로드한다.
+    목표 카드 수(target_count * SCROLL_BUFFER_RATIO)에 도달하거나
+    더 이상 새 카드가 로드되지 않으면 중단한다.
 
+    Args:
+        target_count: 목표 수집 상품 수. 필터링 여유분을 포함해
+                      실제로는 target_count * SCROLL_BUFFER_RATIO 개까지 로드한다.
     Returns:
         마지막으로 확인된 상품 카드 수
     """
+    card_target = int(target_count * SCROLL_BUFFER_RATIO)
     prev_count = 0
     no_change_streak = 0
 
@@ -138,7 +149,13 @@ async def _scroll_to_bottom(page: Page, card_selector: str) -> int:
             pass
 
         current_count = await page.locator(card_selector).count()
-        logger.debug(f"스크롤 {attempt + 1}회 — 카드 수: {current_count}")
+        logger.debug(f"스크롤 {attempt + 1}회 — 카드 수: {current_count} (목표: {card_target})")
+
+        # 목표 카드 수 달성 시 조기 종료
+        if current_count >= card_target:
+            logger.info(f"목표 카드 수 달성 ({current_count} >= {card_target}) → 스크롤 종료")
+            prev_count = current_count
+            break
 
         if current_count == prev_count:
             no_change_streak += 1

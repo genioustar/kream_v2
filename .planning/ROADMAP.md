@@ -31,7 +31,7 @@
 **Plans**: TBD
 
 Plans:
-- [ ] 01-01: nike/crawler.py 구현 (세일 신발 크롤링, NaverProduct 포맷)
+- [x] 01-01: nike/crawler.py 구현 (세일 신발 크롤링, NaverProduct 포맷)
 - [ ] 01-02: main.py STEP 1 통합 및 파이프라인 연결
 
 #### Phase 2: 안정성 및 버그 수정
@@ -78,7 +78,7 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1. 나이키 공홈 크롤러 추가 | v1.1 | 0/2 | Not started | - |
+| 1. 나이키 공홈 크롤러 추가 | v1.1 | 1/2 | In Progress|  |
 | 2. 안정성 및 버그 수정 | v1.1 | 0/2 | Not started | - |
 | 3. 성능 개선 | v1.1 | 0/2 | Not started | - |
 | 4. 텔레그램 알림 | v1.1 | 0/1 | Not started | - |

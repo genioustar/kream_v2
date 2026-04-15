@@ -1,7 +1,7 @@
 # resell-sniper 아키텍처
 
 ## 개요
-네이버 쇼핑몰(브랜드스토어·스마트스토어) 및 아디다스 공홈에서 상품을 수집하고, Kream에서 동일 상품의 리셀 가격과 거래량을 조회하여 차익 거래 기회를 자동으로 탐색하는 파이프라인.
+네이버 쇼핑몰(브랜드스토어·스마트스토어), 아디다스 공홈, 나이키 공홈에서 상품을 수집하고, Kream에서 동일 상품의 리셀 가격과 거래량을 조회하여 차익 거래 기회를 자동으로 탐색하는 파이프라인.
 
 ## 실행 방법
 
@@ -70,6 +70,10 @@ resell-sniper/
 ├── adidas/               # 아디다스 공홈 크롤러
 │   └── crawler.py        # crawl_adidas() — Extra Sale 신발, NaverProduct 포맷 저장
 │
+├── nike/                 # 나이키 공홈 크롤러
+│   ├── __init__.py
+│   └── crawler.py        # crawl_nike() — 세일 신발 무한스크롤, NaverProduct 포맷 저장
+│
 ├── naver/                # 네이버 크롤러
 │   ├── crawler.py        # crawl_naver() — 사이트별 병렬 크롤링
 │   └── parser.py         # 네이버 HTML 파싱
@@ -83,6 +87,7 @@ resell-sniper/
 │   ├── YYYYMMDD/
 │   │   ├── naver_products.json
 │   │   ├── adidas_products.json
+│   │   ├── nike_products.json
 │   │   └── arbitrage_results.json
 │   ├── diff/
 │   │   └── YYYYMMDD_vs_YYYYMMDD/
@@ -114,6 +119,16 @@ resell-sniper/
 - `_load_cookies(context)` / `_save_cookies(context)` — `output/session/kream_cookies.json`에 쿠키 영속화
 - `create_browser(headless)` — UA 1회 선택 후 컨텍스트 전체에 적용, `timezone_id="Asia/Seoul"` 설정, sec-ch-ua 헤더 자동 주입, 시작 시 쿠키 로드·종료 시 저장
 - `new_stealth_page(context)` — playwright-stealth 적용 + webdriver 탐지 제거
+
+### nike/crawler.py
+- `crawl_nike()` — 나이키 세일 신발 페이지 전체 크롤링. create_browser + new_stealth_page 조합 사용 (CDP 불필요).
+- `_find_card_selector(page)` — CARD_SELECTORS 후보 목록에서 실제 DOM에 존재하는 셀렉터 자동 탐지. 전부 실패 시 URL·제목·본문 앞 500자를 WARNING 로그로 출력
+- `_scroll_to_bottom(page, card_selector)` — 무한스크롤 처리. NO_CHANGE_LIMIT(3)회 연속 카드 수 변화 없으면 종료
+- `_extract_all_products(page, card_selector)` — JS evaluate로 카드 일괄 파싱. Kids 필터, 중복 제거 포함
+- `_parse_price(price_str)` — 가격 문자열에서 숫자 추출 (실패 시 None)
+- `_extract_model_name(card_text, href)` — 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 fallback
+- `_should_exclude(card_text, subtitle)` — EXCLUDE_KEYWORDS("kids", "어린이", "유아", "주니어") 포함 여부 검사
+- 저장 포맷: `NaverProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
 
 ### adidas/crawler.py
 - `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. Kids 카테고리 자동 제외. 페이지네이션 처리.
@@ -166,6 +181,7 @@ resell-sniper/
 | `MIN_PRICE_DIFF` | 10,000 | 차익 최솟값 (원) |
 | `KREAM_MAX_CONCURRENCY` | 2 | 동시 Kream 검색 페이지 수 |
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
+| `NIKE_SALE_URL` | nike.com/kr/w/clearance-shoes | 나이키 성인 세일 신발 URL |
 
 ## 새 크롤링 소스 추가 방법
 

@@ -27,7 +27,7 @@
 
 ### 새 크롤링 소스
 
-- [ ] **SRC-01**: 새 쇼핑몰 크롤러 1개 이상 추가 (무신사, 나이키 공홈 등 협의 후 결정)
+- [x] **SRC-01**: 새 쇼핑몰 크롤러 1개 이상 추가 (무신사, 나이키 공홈 등 협의 후 결정)
 - [ ] **SRC-02**: 새 소스 NaverProduct 포맷 통합 (자동 diff·비교 포함)
 
 ### 안정성 및 버그 수정
@@ -64,7 +64,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRC-01 | Phase 1 | Pending |
+| SRC-01 | Phase 1 | Complete |
 | SRC-02 | Phase 1 | Pending |
 | STBL-01 | Phase 2 | Pending |
 | STBL-02 | Phase 2 | Pending |

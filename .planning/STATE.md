@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 확장 및 안정화
 status: executing
-last_updated: "2026-04-15T04:20:44.156Z"
+last_updated: "2026-04-15T04:24:22.418Z"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -49,6 +49,7 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 - [01-nike-crawler] CDP 대신 create_browser+new_stealth_page 사용 — 나이키는 Akamai 없음, 일반 stealth로 충분
 - [01-nike-crawler] 스타일코드(CN8490-002) 우선 모델명 추출 — Kream 검색 정확도 최대화
 - [01-nike-crawler] 성인 전용 URL + 키워드 2차 필터 — Kids 완전 제외
+- [Phase 01-nike-crawler]: nike 블록은 아디다스 패턴 복제 — try/except 예외 격리, 빈 결과 시 파일 저장 생략
 
 ## Recent Activity
 

@@ -9,6 +9,7 @@
 # Makefile 사용 (권장)
 make chrome   # Chrome CDP 실행 (아디다스 크롤러 필수)
 make adidas   # Chrome 실행 후 아디다스 단독 크롤링
+make nike     # 나이키 단독 크롤링 (CDP 불필요)
 make crawl    # Chrome 실행 후 전체 크롤링 (Kream 제외)
 make kream    # Kream 검색만 (오늘자 *_products.json 사용)
 make full     # Chrome 실행 후 전체 파이프라인
@@ -32,8 +33,10 @@ main.py --mode full (기본)
   ├── STEP 1: 전체 사이트 크롤링
   │     ├── naver/crawler.py  → output/YYYYMMDD/naver_products.json
   │     │     각 사이트별 병렬 크롤링 (config.SEARCH_URLS)
-  │     └── adidas/crawler.py → output/YYYYMMDD/adidas_products.json
-  │           Extra Sale 신발 전체 수집, Kids 카테고리 제외
+  │     ├── adidas/crawler.py → output/YYYYMMDD/adidas_products.json
+  │     │     Extra Sale 신발 전체 수집, Kids 카테고리 제외
+  │     └── nike/crawler.py   → output/YYYYMMDD/nike_products.json
+  │           세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     * 오늘자 파일이 이미 있으면 스킵
   │
   ├── STEP 2: Kream 검색 대상 결정 + 검색
@@ -188,6 +191,8 @@ resell-sniper/
 1. `{소스명}/crawler.py` 생성 — `crawl_{소스명}()` 구현, `NaverProduct` 포맷으로 반환
 2. `main.py` STEP 1에 크롤링 호출 및 `{소스명}_products.json` 저장 추가
 3. 나머지(Kream 검색 대상 포함·diff 생성·차익 비교)는 자동 처리됨
+
+**참고:** Phase 1 에서 추가된 `nike/crawler.py` 가 이 패턴의 실제 사례이다.
 
 ## 탐지 우회 전략
 1. Playwright-stealth 적용으로 자동화 시그니처 제거

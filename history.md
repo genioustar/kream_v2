@@ -1,5 +1,11 @@
 # 변경 히스토리
 
+## 2026-04-15 — Phase 1 나이키 공홈 크롤러 추가
+
+- Phase 1 (나이키 공홈 크롤러 추가) 완료: `nike/crawler.py` 신규 작성, `config.NIKE_SALE_URL` 상수 추가, `main.py` STEP 1 에 나이키 크롤링 블록 추가, `Makefile` 에 `make nike` 타겟 추가. 무한스크롤 + JS 일괄 파싱 + Kids 키워드 필터로 세일 신발을 수집하며 기존 diff·Kream 차익 비교 파이프라인에 자동 통합됨.
+
+---
+
 ## 2026-04-13 — 아디다스 크롤러 완성
 
 ### chrome-debug.sh / Makefile 추가

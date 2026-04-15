@@ -126,7 +126,10 @@ async def _scroll_to_bottom(
     target_count: int = TARGET_PRODUCT_COUNT,
 ) -> int:
     """
-    페이지를 스크롤하며 상품 카드를 로드한다.
+    마지막 카드 요소에 scroll_into_view_if_needed()를 호출해
+    Nike의 Intersection Observer 기반 무한스크롤을 트리거한다.
+
+    window.scrollTo는 Nike 무한스크롤에 반응하지 않으므로 사용하지 않는다.
     목표 카드 수(target_count * SCROLL_BUFFER_RATIO)에 도달하거나
     더 이상 새 카드가 로드되지 않으면 중단한다.
 
@@ -141,23 +144,29 @@ async def _scroll_to_bottom(
     no_change_streak = 0
 
     for attempt in range(MAX_SCROLL_ATTEMPTS):
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(SCROLL_PAUSE_MS)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
-        except Exception:
-            pass
-
         current_count = await page.locator(card_selector).count()
-        logger.debug(f"스크롤 {attempt + 1}회 — 카드 수: {current_count} (목표: {card_target})")
+
+        # 마지막 카드로 스크롤 — Intersection Observer 트리거
+        if current_count > 0:
+            try:
+                last_card = page.locator(card_selector).last()
+                await last_card.scroll_into_view_if_needed(timeout=5_000)
+            except Exception:
+                # fallback: mouse.wheel로 아래로 스크롤
+                await page.mouse.wheel(0, 3000)
+
+        await page.wait_for_timeout(SCROLL_PAUSE_MS)
+
+        new_count = await page.locator(card_selector).count()
+        logger.debug(f"스크롤 {attempt + 1}회 — 카드 수: {new_count} (목표: {card_target})")
 
         # 목표 카드 수 달성 시 조기 종료
-        if current_count >= card_target:
-            logger.info(f"목표 카드 수 달성 ({current_count} >= {card_target}) → 스크롤 종료")
-            prev_count = current_count
+        if new_count >= card_target:
+            logger.info(f"목표 카드 수 달성 ({new_count} >= {card_target}) → 스크롤 종료")
+            prev_count = new_count
             break
 
-        if current_count == prev_count:
+        if new_count == prev_count:
             no_change_streak += 1
             if no_change_streak >= NO_CHANGE_LIMIT:
                 logger.debug(f"{NO_CHANGE_LIMIT}회 연속 변화 없음 → 스크롤 종료")
@@ -165,7 +174,7 @@ async def _scroll_to_bottom(
         else:
             no_change_streak = 0
 
-        prev_count = current_count
+        prev_count = new_count
 
     logger.info(f"스크롤 완료 — 최종 카드 수: {prev_count}개")
     return prev_count

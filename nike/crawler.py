@@ -120,64 +120,77 @@ async def _find_card_selector(page: Page) -> str | None:
     return None
 
 
-async def _scroll_to_bottom(
+async def _scroll_and_collect(
     page: Page,
     card_selector: str,
     target_count: int = TARGET_PRODUCT_COUNT,
-) -> int:
+) -> list[NaverProduct]:
     """
-    마지막 카드 요소에 scroll_into_view_if_needed()를 호출해
-    Nike의 Intersection Observer 기반 무한스크롤을 트리거한다.
+    스크롤하면서 매 이터레이션마다 상품을 추출해 URL 기반으로 누적한다.
 
-    window.scrollTo는 Nike 무한스크롤에 반응하지 않으므로 사용하지 않는다.
-    목표 카드 수(target_count * SCROLL_BUFFER_RATIO)에 도달하거나
-    더 이상 새 카드가 로드되지 않으면 중단한다.
+    Nike는 가상 스크롤을 사용해 DOM에 보이는 카드만 렌더링하고 나머지는 제거한다.
+    따라서 스크롤 완료 후 한 번에 추출하면 현재 화면 카드만 잡힌다.
+    스크롤마다 추출·누적하는 방식으로 이 문제를 해결한다.
+
+    스크롤 전략:
+    1. scroll_into_view_if_needed (마지막 카드) — IntersectionObserver 트리거
+    2. mouse.wheel fallback — 뷰포트 기준 강제 스크롤
+    3. End 키 fallback — 추가 트리거
 
     Args:
-        target_count: 목표 수집 상품 수. 필터링 여유분을 포함해
-                      실제로는 target_count * SCROLL_BUFFER_RATIO 개까지 로드한다.
+        target_count: 목표 수집 상품 수 (필터링 후 기준)
     Returns:
-        마지막으로 확인된 상품 카드 수
+        중복 제거된 NaverProduct 리스트
     """
-    card_target = int(target_count * SCROLL_BUFFER_RATIO)
-    prev_count = 0
+    # URL 기준 중복 제거 (가상 스크롤로 같은 상품이 여러 번 추출될 수 있음)
+    seen_urls: dict[str, NaverProduct] = {}
     no_change_streak = 0
 
     for attempt in range(MAX_SCROLL_ATTEMPTS):
-        current_count = await page.locator(card_selector).count()
+        # 현재 DOM의 카드 즉시 추출
+        batch = await _extract_all_products(page, card_selector)
+        new_found = 0
+        for p in batch:
+            key = p.url or p.model_name
+            if key and key not in seen_urls:
+                seen_urls[key] = p
+                new_found += 1
 
-        # 마지막 카드로 스크롤 — Intersection Observer 트리거
-        if current_count > 0:
-            try:
-                last_card = page.locator(card_selector).last()
-                await last_card.scroll_into_view_if_needed(timeout=5_000)
-            except Exception:
-                # fallback: mouse.wheel로 아래로 스크롤
-                await page.mouse.wheel(0, 3000)
+        total = len(seen_urls)
+        logger.info(f"스크롤 {attempt + 1}회 — 이번 배치: {len(batch)}개, 누적: {total}개")
 
-        await page.wait_for_timeout(SCROLL_PAUSE_MS)
-
-        new_count = await page.locator(card_selector).count()
-        logger.debug(f"스크롤 {attempt + 1}회 — 카드 수: {new_count} (목표: {card_target})")
-
-        # 목표 카드 수 달성 시 조기 종료
-        if new_count >= card_target:
-            logger.info(f"목표 카드 수 달성 ({new_count} >= {card_target}) → 스크롤 종료")
-            prev_count = new_count
+        if total >= target_count:
+            logger.info(f"목표 수집 수 달성 ({total} >= {target_count}) → 종료")
             break
 
-        if new_count == prev_count:
+        if new_found == 0:
             no_change_streak += 1
             if no_change_streak >= NO_CHANGE_LIMIT:
-                logger.debug(f"{NO_CHANGE_LIMIT}회 연속 변화 없음 → 스크롤 종료")
+                logger.info(f"{NO_CHANGE_LIMIT}회 연속 새 상품 없음 → 종료")
                 break
         else:
             no_change_streak = 0
 
-        prev_count = new_count
+        # 스크롤 트리거 (순서대로 시도)
+        card_count = await page.locator(card_selector).count()
+        scrolled = False
+        if card_count > 0:
+            try:
+                last_card = page.locator(card_selector).last()
+                await last_card.scroll_into_view_if_needed(timeout=3_000)
+                scrolled = True
+            except Exception:
+                pass
 
-    logger.info(f"스크롤 완료 — 최종 카드 수: {prev_count}개")
-    return prev_count
+        if not scrolled:
+            await page.mouse.wheel(0, 5_000)
+
+        await page.keyboard.press("End")
+        await page.wait_for_timeout(SCROLL_PAUSE_MS)
+
+    products = list(seen_urls.values())
+    logger.info(f"스크롤 완료 — 최종 수집: {len(products)}개")
+    return products
 
 
 def _parse_price(price_str: str | None) -> int | None:
@@ -363,11 +376,8 @@ async def crawl_nike() -> list[NaverProduct]:
                 logger.error("상품 카드 셀렉터를 찾을 수 없습니다. DOM 구조를 확인하세요.")
                 return []
 
-            # 무한스크롤로 전체 상품 로드
-            await _scroll_to_bottom(page, card_selector)
-
-            # 상품 파싱
-            products = await _extract_all_products(page, card_selector)
+            # 스크롤하면서 상품 점진적 수집 (가상 스크롤 대응)
+            products = await _scroll_and_collect(page, card_selector)
 
             logger.info(f"나이키 크롤링 완료 — 총 {len(products)}개")
             return products

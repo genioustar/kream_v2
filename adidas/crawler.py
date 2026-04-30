@@ -16,6 +16,7 @@ import random
 from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
@@ -28,7 +29,6 @@ logger = get_logger("adidas.crawler")
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-ADIDAS_EXTRA_SALE_URL = "https://www.adidas.co.kr/extra_sale-shoes?sort=price-low-to-high"
 SITE_NAME             = "adidas"
 PAGE_LOAD_TIMEOUT     = 60_000
 SELECTOR_TIMEOUT      = 15_000
@@ -181,8 +181,18 @@ async def crawl_adidas() -> list[NaverProduct]:
     실행 전 크롬을 --remote-debugging-port=9222 로 먼저 실행해야 한다.
 
     Returns:
-        NaverProduct 포맷으로 수집된 아디다스 상품 목록
+        NaverProduct 포맷으로 수집된 아디다스 상품 목록.
+        config.ADIDAS_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     """
+    sale_url = getattr(config, "ADIDAS_SALE_URL", "") or ""
+    if not sale_url.strip():
+        logger.info("config.ADIDAS_SALE_URL 미설정 — 아디다스 크롤링 건너뜀")
+        return []
+
+    # redirect 감지용 키워드: URL path 의 마지막 segment
+    # 예) /extra_sale-shoes?sort=... → "extra_sale-shoes"
+    expected_segment = urlparse(sale_url).path.rstrip("/").rsplit("/", 1)[-1]
+
     all_products: list[NaverProduct] = []
 
     pw = await async_playwright().start()
@@ -204,10 +214,10 @@ async def crawl_adidas() -> list[NaverProduct]:
         context = browser.contexts[0]
         page = await context.new_page()
 
-        logger.info(f"아디다스 Extra Sale 페이지 이동: {ADIDAS_EXTRA_SALE_URL}")
+        logger.info(f"아디다스 Extra Sale 페이지 이동: {sale_url}")
         try:
             await page.goto(
-                ADIDAS_EXTRA_SALE_URL,
+                sale_url,
                 wait_until="domcontentloaded",
                 timeout=PAGE_LOAD_TIMEOUT,
             )
@@ -218,7 +228,7 @@ async def crawl_adidas() -> list[NaverProduct]:
         final_url = page.url
         page_title = await page.title()
         logger.info(f"페이지 로드 완료 — URL: {final_url} | 제목: {page_title!r}")
-        if "extra_sale" not in final_url:
+        if expected_segment and expected_segment not in final_url:
             logger.warning(
                 f"Extra Sale URL에서 다른 페이지로 이동됨 — 세일 종료 또는 차단 가능성 있음. "
                 f"현재 URL: {final_url}"

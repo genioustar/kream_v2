@@ -3,7 +3,7 @@ PYTHONPATH_ENV = PYTHONPATH=$(shell pwd)
 
 .PHONY: chrome adidas nike crawl kream full
 
-## Chrome CDP 실행 (아디다스 크롤러 필수)
+## Chrome CDP 실행 (아디다스/나이키 크롤러 필수)
 chrome:
 	@./chrome-debug.sh
 
@@ -12,7 +12,7 @@ adidas: chrome
 	$(PYTHONPATH_ENV) $(PYTHON) adidas/crawler.py
 
 ## 나이키 단독 크롤링
-nike:
+nike: chrome
 	$(PYTHONPATH_ENV) $(PYTHON) nike/crawler.py
 
 ## 전체 크롤링만 (Kream 검색 제외)

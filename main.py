@@ -277,7 +277,15 @@ async def main(mode: str) -> None:
 
     arb_output = output_dir / "arbitrage_results.json"
     try:
-        _save_json(arbitrage_results, arb_output)
+        arb_dicts = []
+        for item in arbitrage_results:
+            d = asdict(item)
+            d["price_diff"] = f"{d['price_diff']:,}"
+            arb_dicts.append(d)
+        arb_output.write_text(
+            json.dumps(arb_dicts, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         logger.info(f"차익 거래 가능 {len(arbitrage_results)}개 저장 → {arb_output}")
     except Exception as exc:
         logger.error(f"arbitrage_results.json 저장 실패: {exc}")

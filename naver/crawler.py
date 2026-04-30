@@ -186,18 +186,39 @@ async def crawl_naver() -> list[NaverProduct]:
     config.SEARCH_URLS에 정의된 모든 네이버 사이트를 병렬로 크롤링하여 상품을 수집합니다.
 
     Returns:
-        수집된 NaverProduct 전체 목록
+        수집된 NaverProduct 전체 목록.
+        config.SEARCH_URLS 가 비어있거나 모든 항목의 url 이 누락이면 [] 반환.
 
     Raises:
-        RuntimeError: 모든 사이트 크롤링이 실패한 경우
+        RuntimeError: 유효한 사이트가 있었으나 모두 크롤링에 실패한 경우
     """
+    search_urls = getattr(config, "SEARCH_URLS", None) or []
+    if not search_urls:
+        logger.info("config.SEARCH_URLS 미설정/빈 목록 — 네이버 크롤링 건너뜀")
+        return []
+
+    # 항목별 url 누락은 해당 사이트만 스킵, 나머지는 진행
+    valid_sites: list[dict] = []
+    for site_info in search_urls:
+        url = (site_info.get("url") or "").strip()
+        if not url:
+            logger.warning(
+                f"[{site_info.get('site_name', '?')}] url 누락 — 해당 사이트 건너뜀"
+            )
+            continue
+        valid_sites.append(site_info)
+
+    if not valid_sites:
+        logger.info("config.SEARCH_URLS 의 모든 항목에 url 이 없음 — 네이버 크롤링 건너뜀")
+        return []
+
     async with create_browser(headless=True) as context:
-        tasks = [_crawl_site(context, site_info) for site_info in config.SEARCH_URLS]
+        tasks = [_crawl_site(context, site_info) for site_info in valid_sites]
         gather_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_products: list[NaverProduct] = []
     failed_sites: list[str] = []
-    for site_info, result in zip(config.SEARCH_URLS, gather_results):
+    for site_info, result in zip(valid_sites, gather_results):
         if isinstance(result, Exception):
             logger.error(f"사이트 크롤링 실패 [{site_info['site_name']}]: {result}")
             failed_sites.append(site_info["site_name"])
@@ -207,7 +228,7 @@ async def crawl_naver() -> list[NaverProduct]:
     if failed_sites:
         logger.warning(f"실패한 사이트: {failed_sites}")
 
-    if not all_products and len(failed_sites) == len(config.SEARCH_URLS):
+    if not all_products and len(failed_sites) == len(valid_sites):
         raise RuntimeError(f"모든 네이버 사이트 크롤링에 실패했습니다: {failed_sites}")
 
     logger.info(f"전체 수집 완료 - 총 {len(all_products)}개 상품")

@@ -1,5 +1,55 @@
 # 변경 히스토리
 
+## 2026-04-28 — 크롤링 URL 단일 출처(config.py) 통일
+
+- `adidas/crawler.py` 의 `ADIDAS_EXTRA_SALE_URL` 하드코딩 상수 제거 → `config.ADIDAS_SALE_URL` 사용으로 통일 (`nike` 와 동일 패턴)
+- `config.ADIDAS_SALE_URL` 값을 죽은 outlet URL 에서 실사용 URL(`extra_sale-shoes?sort=price-low-to-high`) 로 교정
+- naver/adidas/nike 크롤러에 URL 부재 가드 추가: 변수 미설정 또는 빈 값이면 안내 로그 후 즉시 `[]` 반환 (해당 크롤링만 스킵, 파이프라인 계속)
+- `naver/crawler.py` 항목 단위 가드: `SEARCH_URLS` 항목별 `url` 누락 시 그 사이트만 스킵
+- redirect 감지 하드코딩 키워드(`"extra_sale"`, `"clearance-shoes"`) 제거 → URL path 마지막 segment 자동 추출 방식으로 교체
+- `ARCHITECTURE.md` 의 모듈 설명·config 표 갱신, `ADIDAS_SALE_URL` 항목 추가
+
+## 2026-04-22 — 문서·코드 정합성 정리 (하네스 엔지니어링 룰 도입)
+
+### nike/crawler.py 죽은 코드 제거 (473→311줄)
+- API 인터셉트 전환 후 남아있던 DOM 파싱 잔재 일괄 삭제
+- 제거 함수: `_find_card_selector()`, `_extract_all_products()`, `_parse_price()`
+- 제거 상수: `CARD_SELECTORS`, `TITLE_SELECTOR`, `SUBTITLE_SELECTOR`, `PRICE_SELECTOR`, `LINK_SELECTOR`, `SELECTOR_TIMEOUT_MS`, `DIAG_BODY_TEXT_LEN`, `SCROLL_BUFFER_RATIO`, `API_ATTRIBUTE_IDS`, `API_PAGE_SIZE`, `_JS_EXTRACT`
+- 현재 실행 체인: `crawl_nike()` → `_collect_via_api()` → `_parse_api_product()` (+ `_should_exclude`, `_extract_model_name`)
+
+### ARCHITECTURE.md — nike 섹션 재작성
+- "create_browser + new_stealth_page 조합 사용 (CDP 불필요)" 오기를 제거, CDP 필수 방식으로 정정
+- 존재하지 않거나 호출되지 않던 함수 기술 삭제, `_collect_via_api`·`_parse_api_product` 기술 추가
+
+### .planning/STATE.md — Decisions 갱신
+- "CDP 대신 create_browser+new_stealth_page 사용" 결정을 SUPERSEDED 처리하고 CDP 채택 결정으로 대체
+
+### CLAUDE.md — 하네스 엔지니어링 룰 추가
+- 경로 교체 시 잔재 즉시 제거, grep 0회면 삭제, 문서/코드 1:1 정합성, SUPERSEDED 포맷, 세션 종료 전 체크리스트 명문화
+
+### CLAUDE.md — 크롤러 검증 시 Playwright MCP 활용 규칙 추가
+- Evaluator 단계에서 Playwright MCP 로 대상 사이트 DOM 과 크롤링 JSON 을 교차 검증하는 절차 도입
+- Firecrawl·Fetch 정적 HTML MCP 사용 금지 (SPA·Kasada·Akamai 우회 불가)
+- 검증은 CDP 포트 9222 세션을 크롤러와 순차 공유, 수정된 크롤러만 대상으로 수행
+- 판정 기준: PASS(모든 항목 충족) / FLAG(상품수 미달이지만 샘플 일치) / FAIL(샘플 불일치·DOM 접근 실패)
+- 설치 명령: `claude mcp add playwright npx @playwright/mcp@latest`
+
+---
+
+## 2026-04-15 — 나이키 크롤러 Kasada 우회 및 API 인터셉트 방식 전환
+
+### 문제 진단
+- `nike/crawler.py` 가 21개 상품만 수집하는 문제 발생
+- 원인: Nike가 Kasada 봇 탐지를 사용하며, Playwright 자체 Chromium을 감지해 무한스크롤 JS를 비활성화 — 초기 SSR 21개만 서빙
+- 증거: 크롤러 실행 시 scrollY가 0→4569px까지 정상 이동하지만 API 호출 전혀 없음
+
+### 해결 방법
+- **Playwright Chromium → 실제 Chrome CDP 전환**: `create_browser()` 제거, `async_playwright().connect_over_cdp("http://localhost:9222")` 채택 (아디다스와 동일 방식)
+- **DOM 파싱 → API 응답 인터셉트**: `page.on("response", ...)` 로 `api.nike.com/discover/product_wall` 응답을 인터셉트해 JSON 직접 파싱
+- **실제 API 응답 구조 확인**: `productGroupings[*].products` (기존 가정 `productWall.products` 오류)
+- **올바른 필드명 적용**: `copy.title`, `copy.subTitle`, `prices.currentPrice`, `pdpUrl.url`, `productCode`
+- **Makefile 수정**: `make nike` 타겟이 `make chrome`에 의존하도록 추가
+
 ## 2026-04-15 — Phase 1 나이키 공홈 크롤러 추가
 
 - Phase 1 (나이키 공홈 크롤러 추가) 완료: `nike/crawler.py` 신규 작성, `config.NIKE_SALE_URL` 상수 추가, `main.py` STEP 1 에 나이키 크롤링 블록 추가, `Makefile` 에 `make nike` 타겟 추가. 무한스크롤 + JS 일괄 파싱 + Kids 키워드 필터로 세일 신발을 수집하며 기존 diff·Kream 차익 비교 파이프라인에 자동 통합됨.

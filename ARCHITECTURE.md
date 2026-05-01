@@ -7,24 +7,19 @@
 
 ```bash
 # Makefile 사용 (권장)
-make chrome   # Chrome CDP 실행 (아디다스·나이키 크롤러 필수)
-make adidas   # Chrome 실행 후 아디다스 단독 크롤링
-make nike     # Chrome 실행 후 나이키 단독 크롤링
-make crawl    # Chrome 실행 후 전체 크롤링 (Kream 제외)
+make chrome   # Chrome CDP 실행 — adidas·nike 크롤링 전 필수
+make adidas   # 아디다스 단독 크롤링
+make nike     # 나이키 단독 크롤링
+make crawl    # 전체 크롤링 (Kream 제외)
 make kream    # Kream 검색만 (오늘자 *_products.json 사용)
-make full     # Chrome 실행 후 전체 파이프라인
+make full     # 전체 파이프라인 (기본)
 
 # 직접 실행
-./chrome-debug.sh                                    # Chrome CDP 실행
 PYTHONPATH=. python main.py                          # full (기본)
 PYTHONPATH=. python main.py --mode crawl             # 크롤링만
 PYTHONPATH=. python main.py --mode kream             # Kream 검색만
 PYTHONPATH=. python adidas/crawler.py                # 아디다스 단독
 ```
-
-> **Chrome CDP 필수**: 아디다스(Akamai)·나이키(Kasada) 크롤러 모두 봇 탐지 우회를 위해 실제 Chrome에 연결한다.
-> Playwright 자체 Chromium은 fingerprint 탐지에 걸려 차단되거나 제한된 응답(21개)을 받는다.
-> Chrome 실행 시 `--user-data-dir` 옵션이 없으면 포트가 바인딩되지 않으므로 `chrome-debug.sh` 또는 `make chrome`을 사용할 것.
 
 ## 실행 흐름
 
@@ -63,8 +58,7 @@ resell-sniper/
 ├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream)
 ├── config.py             # 사이트 URL, 필터 상수, 동시성 설정
 ├── diff_output.py        # 날짜별 JSON 변경분 비교 도구
-├── chrome-debug.sh       # Chrome CDP 실행 스크립트 (--user-data-dir 필수)
-├── Makefile              # make chrome/adidas/crawl/kream/full 단축 명령
+├── Makefile              # make chrome/adidas/nike/crawl/kream/full 단축 명령 (macOS·Windows 공용)
 │
 ├── common/               # 공유 모듈
 │   ├── browser.py        # create_browser(), new_stealth_page(), USER_AGENTS
@@ -102,7 +96,7 @@ resell-sniper/
 │
 ├── logs/                 # 로그 파일
 ├── requirements.txt
-└── venv/
+└── .venv/
 ```
 
 ## 주요 모듈 설명
@@ -125,7 +119,7 @@ resell-sniper/
 - `new_stealth_page(context)` — playwright-stealth 적용 + webdriver 탐지 제거
 
 ### nike/crawler.py
-- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp(CDP_URL)`). Kasada 탐지로 Playwright Chromium은 차단됨. URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kasada 탐지로 Playwright Chromium은 차단됨. URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_collect_via_api(page, target_count=100)` — 스크롤로 Nike JS가 `product_wall` API 호출을 유도하고 `page.on("response", ...)` 로 JSON 응답을 인터셉트해 수집. scrollY 변화 없음 NO_CHANGE_LIMIT(6)회 연속이면 종료
 - `_parse_api_product(item, crawled_at)` — API 응답 항목을 `NaverProduct` 로 변환. 필드: `copy.title`, `copy.subTitle`, `prices.currentPrice`, `pdpUrl.url`, `productCode`
 - `_extract_model_name(card_text, href)` — `_parse_api_product` 내 폴백. 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 3순위
@@ -133,7 +127,7 @@ resell-sniper/
 - 저장 포맷: `NaverProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
 
 ### adidas/crawler.py
-- `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. Kids 카테고리 자동 제외. 페이지네이션 처리. URL 출처: `config.ADIDAS_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kids 카테고리 자동 제외. 페이지네이션 처리. URL 출처: `config.ADIDAS_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_find_card_selector(page)` — CARD_SELECTORS 후보 목록에서 실제 DOM에 존재하는 셀렉터 자동 탐지. 전부 실패 시 URL·제목·본문 앞 500자를 WARNING 로그로 출력
 - `_extract_products(page, card_selector)` — JS evaluate로 카드 일괄 파싱 (상품명·코드·세일가·Kids 여부)
 - 상품명 추출: `href` URL 경로에서 `decodeURIComponent` → `-` 공백 치환 방식 (innerText 파싱 대비 UI 텍스트 오염 없음)

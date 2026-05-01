@@ -32,7 +32,7 @@ logger = get_logger("adidas.crawler")
 SITE_NAME             = "adidas"
 PAGE_LOAD_TIMEOUT     = 60_000
 SELECTOR_TIMEOUT      = 15_000
-CDP_URL               = "http://localhost:9222"
+CDP_URL               = "http://127.0.0.1:9222"
 
 # 상품 카드 셀렉터 후보 (앞에서부터 시도)
 # article[class*="product"] 를 우선 — product-card 는 너무 광범위하게 매칭됨

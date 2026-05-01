@@ -32,7 +32,7 @@ logger = get_logger("nike.crawler")
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-CDP_URL                 = "http://localhost:9222"  # make chrome으로 먼저 실행
+CDP_URL                 = "http://127.0.0.1:9222"  # make chrome으로 먼저 실행
 SITE_NAME               = "nike"
 PAGE_LOAD_TIMEOUT_MS    = 60_000
 PAGE_SETTLE_SEC         = 3.0

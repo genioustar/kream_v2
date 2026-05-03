@@ -6,19 +6,12 @@
 ## 실행 방법
 
 ```bash
-# Makefile 사용 (권장)
-make chrome   # Chrome CDP 실행 — adidas·nike 크롤링 전 필수
-make adidas   # 아디다스 단독 크롤링
-make nike     # 나이키 단독 크롤링
-make crawl    # 전체 크롤링 (Kream 제외)
-make kream    # Kream 검색만 (오늘자 *_products.json 사용)
-make full     # 전체 파이프라인 (기본)
-
-# 직접 실행
-PYTHONPATH=. python main.py                          # full (기본)
-PYTHONPATH=. python main.py --mode crawl             # 크롤링만
-PYTHONPATH=. python main.py --mode kream             # Kream 검색만
-PYTHONPATH=. python adidas/crawler.py                # 아디다스 단독
+python chrome.py              # Chrome CDP 실행 — adidas·nike 크롤링 전 필수
+python main.py                # 전체 파이프라인 (기본: full)
+python main.py --mode crawl   # 전체 크롤링 (Kream 제외)
+python main.py --mode kream   # Kream 검색만 (오늘자 *_products.json 사용)
+python -m adidas.crawler      # 아디다스 단독 크롤링
+python -m nike.crawler        # 나이키 단독 크롤링
 ```
 
 ## 실행 흐름
@@ -57,9 +50,9 @@ main.py --mode full (기본)
 ```
 resell-sniper/
 ├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream)
+├── chrome.py             # Chrome CDP 디버깅 모드 실행 스크립트 (Windows/macOS 공용)
 ├── config.py             # 사이트 URL, 필터 상수, 동시성 설정
 ├── diff_output.py        # 날짜별 JSON 변경분 비교 도구
-├── Makefile              # make chrome/adidas/nike/crawl/kream/full 단축 명령 (macOS·Windows 공용)
 │
 ├── common/               # 공유 모듈
 │   ├── browser.py        # create_browser(), new_stealth_page(), USER_AGENTS

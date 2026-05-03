@@ -7,7 +7,7 @@ SEARCH_URLS = [
     {"site_name": "artemoa", "url": "https://smartstore.naver.com/artemoa/category/4189ca0f9ee448be913cd0123f7fd0e3?cp=1", "type": "smart_store"},
     {"site_name": "burningwear", "url": "https://smartstore.naver.com/burningwear/best?cp=1", "type": "smart_store"},
     {"site_name": "reasonershop", "url": "https://smartstore.naver.com/reasonershop/category/9e4d920d708943489393d2ca83467562?cp=1", "type": "smart_store"},
-    {"site_name": "adidas", "url": "https://brand.naver.com/adidas/best?cp=1", "type": "smart_store"}
+    {"site_name": "adidas", "url": "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579&page=1#2-shopping-story-detail", "type": "smart_store"}
 ]
 MIN_TRADE_COUNT = 100
 MIN_PRICE_DIFF = 10000

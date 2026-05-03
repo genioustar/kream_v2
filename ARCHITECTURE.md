@@ -35,16 +35,17 @@ main.py --mode full (기본)
   │           세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     * 오늘자 파일이 이미 있으면 스킵
   │
-  ├── STEP 2: Kream 검색 대상 결정 + 검색
-  │     ├── 전체 크롤 날짜(1·10·20·30일) / kream 모드
-  │     │     오늘자 *_products.json 전체에서 고유 model_name 추출
-  │     └── 그 외 날짜
-  │           diff 생성 후 모든 *_diff.json 의 added/modified 에서 model_name 추출
-  │     → kream/crawler.py 로 Kream 검색 (페이지 풀 KREAM_MAX_CONCURRENCY개)
-  │
-  ├── STEP 3: kream/comparator.py → output/YYYYMMDD/arbitrage_results.json
-  │     전체 소스(*_products.json) 대상으로 차익 비교
-  │     필터 조건: 거래량 >= 100, 가격차 >= 10,000원, price_diff 내림차순 정렬
+  ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
+  │     ├── 모델명 소스 결정
+  │     │     ├── 전체 크롤 날짜(1·10·20·30일) / kream 모드
+  │     │     │     오늘자 *_products.json 전체에서 고유 model_name 추출
+  │     │     └── 그 외 날짜
+  │     │           diff 생성 후 모든 *_diff.json 의 added/modified 에서 model_name 추출
+  │     ├── 200개 초과 시 200개씩 청크 분할 (청크 간 30분 대기)
+  │     └── 각 청크마다:
+  │           1. kream/crawler.py 로 Kream 검색 (페이지 풀 KREAM_MAX_CONCURRENCY개)
+  │           2. kream/comparator.py 로 차익 비교 (누적)
+  │           3. output/YYYYMMDD/arbitrage_results.json 즉시 저장
   │
   └── STEP 4: diff_output.py (전체 크롤 날짜에만 실행)
         오늘자 *_products.json 전체 diff → output/diff/YYYYMMDD_vs_YYYYMMDD/
@@ -108,8 +109,11 @@ resell-sniper/
 - `_load_all_products(output_dir)` — 오늘자 디렉토리의 모든 `*_products.json` 자동 감지·합산 로드
 - `_load_products_json(path)` — 단일 `*_products.json` → `NaverProduct` 리스트 복원
 - `_extract_models_from_diff(diff_path)` — diff 파일의 added/modified 항목에서 model_name 추출
-- `_search_with_page_pool(model_name, page_pool, context)` — 페이지 풀 기반 Kream 검색
-- STEP 2 모델명 소스: 전체 크롤 날짜(1·10·20·30일)는 `*_products.json` 전체, 그 외 날짜는 `*_diff.json` 전체
+- `_search_with_page_pool(model_name, page_pool)` — 페이지 풀 기반 Kream 검색
+- `KREAM_CHUNK_SIZE = 200` — 청크 분할 기준 (모델 수가 이를 초과하면 분할)
+- `KREAM_CHUNK_INTERVAL_SEC = 1800` — 청크 간 대기 시간 (30분)
+- STEP 2~3 모델명 소스: 전체 크롤 날짜(1·10·20·30일)는 `*_products.json` 전체, 그 외 날짜는 `*_diff.json` 전체
+- 청크 처리: 모델 수 > 200이면 200개씩 분할, 각 청크 완료 후 `arbitrage_results.json` 저장, 다음 청크 전 30분 대기
 
 ### common/browser.py
 - `USER_AGENTS` — 12종의 Chrome UA 풀 (Mac/Windows/Linux, Chrome 130~136 최신 버전)
@@ -160,7 +164,7 @@ resell-sniper/
 - `search_kream(model_name, page, context)` — 차단 시 지수 백오프 재시도 + 새 stealth 페이지 생성
 - `_open_search_and_get_input(page)` — 입력창이 이미 보이면 바로 반환(검색 결과 페이지), 없으면 헤더 검색 버튼 클릭 후 반환
 - `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → Enter → 결과 파싱
-- 검색 결과: 첫 번째 상품(검색 결과 맨 왼쪽) 선택
+- 검색 결과: 3개 이상이면 정확한 매칭 없음으로 판단하여 빈 리스트 반환. 1~2개이면 첫 번째 상품 선택
 - 검색 간 딜레이: 8~15초 / 최대 재시도: 3회, 백오프: 30→60→120초
 
 ### diff_output.py

@@ -34,6 +34,10 @@ from nike.crawler import crawl_nike
 # 네이버 전체 상품을 Kream에 조회하는 날짜 (그 외 날짜는 diff 기반으로 조회)
 FULL_CRAWL_DAYS: frozenset[int] = frozenset({1, 10, 20, 30})
 
+# Kream 청크 처리 설정
+KREAM_CHUNK_SIZE = 200           # 200개 초과 시 청크 분할
+KREAM_CHUNK_INTERVAL_SEC = 1800  # 청크 간 대기 시간 (30분)
+
 logger = get_logger("main")
 
 
@@ -235,61 +239,90 @@ async def main(mode: str) -> None:
                     seen.add(mn)
                     unique_models.append(mn)
 
-    logger.info(f"고유 모델명 {len(unique_models)}개 → Kream 검색 시작 (페이지 풀: {config.KREAM_MAX_CONCURRENCY}개)")
-
-    kream_products_map: dict = {}
-
-    async with create_browser(headless=False) as context:
-        page_pool: asyncio.Queue = asyncio.Queue()
-        for i in range(config.KREAM_MAX_CONCURRENCY):
-            logger.info(f"페이지 풀 초기화 [{i+1}/{config.KREAM_MAX_CONCURRENCY}]")
-            page = await init_kream_page(context)
-            await page_pool.put(page)
-            if i < config.KREAM_MAX_CONCURRENCY - 1:
-                await _human_wait(2.0, 4.0)
-
-        tasks = [
-            _search_with_page_pool(mn, page_pool)
-            for mn in unique_models
+    # 200개 초과 시 청크 분할
+    if len(unique_models) > KREAM_CHUNK_SIZE:
+        model_chunks = [
+            unique_models[i:i + KREAM_CHUNK_SIZE]
+            for i in range(0, len(unique_models), KREAM_CHUNK_SIZE)
         ]
-        pair_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for idx, item in enumerate(pair_results):
-        if isinstance(item, Exception):
-            mn = unique_models[idx]
-            logger.error(f"[{mn}] 예상치 못한 오류: {item}", exc_info=True)
-            kream_products_map[mn] = []
-        else:
-            mn, products = item
-            kream_products_map[mn] = products
-
-    total_kream = sum(len(v) for v in kream_products_map.values())
-    logger.info(f"Kream 수집 완료 — 총 {total_kream}개 상품")
-
-    # =========================================================================
-    # STEP 3: 가격 비교 + 필터링
-    # =========================================================================
-    logger.info("=" * 60)
-    logger.info("STEP 3: 차익 거래 필터링")
-    logger.info("=" * 60)
-
-    arbitrage_results = find_arbitrage(all_products, kream_products_map)
-
-    arb_output = output_dir / "arbitrage_results.json"
-    try:
-        arb_dicts = []
-        for item in arbitrage_results:
-            d = asdict(item)
-            d["price_diff"] = f"{d['price_diff']:,}"
-            arb_dicts.append(d)
-        arb_output.write_text(
-            json.dumps(arb_dicts, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        logger.info(
+            f"고유 모델명 {len(unique_models)}개 → "
+            f"{len(model_chunks)}개 청크로 분할 (청크당 최대 {KREAM_CHUNK_SIZE}개, "
+            f"청크 간 {KREAM_CHUNK_INTERVAL_SEC // 60}분 대기)"
         )
-        logger.info(f"차익 거래 가능 {len(arbitrage_results)}개 저장 → {arb_output}")
-    except Exception as exc:
-        logger.error(f"arbitrage_results.json 저장 실패: {exc}")
-        raise
+    else:
+        model_chunks = [unique_models]
+        logger.info(f"고유 모델명 {len(unique_models)}개 → Kream 검색 시작 (페이지 풀: {config.KREAM_MAX_CONCURRENCY}개)")
+
+    arbitrage_results: list = []
+    total_kream = 0
+    arb_output = output_dir / "arbitrage_results.json"
+
+    for chunk_idx, chunk in enumerate(model_chunks):
+        chunk_label = f"청크 [{chunk_idx + 1}/{len(model_chunks)}]"
+        logger.info("=" * 60)
+        logger.info(f"STEP 2~3 {chunk_label}: Kream 검색 + 차익 비교 ({len(chunk)}개)")
+        logger.info("=" * 60)
+
+        kream_products_map: dict = {}
+
+        async with create_browser(headless=False) as context:
+            page_pool: asyncio.Queue = asyncio.Queue()
+            for i in range(config.KREAM_MAX_CONCURRENCY):
+                logger.info(f"페이지 풀 초기화 [{i+1}/{config.KREAM_MAX_CONCURRENCY}]")
+                page = await init_kream_page(context)
+                await page_pool.put(page)
+                if i < config.KREAM_MAX_CONCURRENCY - 1:
+                    await _human_wait(2.0, 4.0)
+
+            tasks = [
+                _search_with_page_pool(mn, page_pool)
+                for mn in chunk
+            ]
+            pair_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for idx, item in enumerate(pair_results):
+            if isinstance(item, Exception):
+                mn = chunk[idx]
+                logger.error(f"[{mn}] 예상치 못한 오류: {item}", exc_info=True)
+                kream_products_map[mn] = []
+            else:
+                mn, products = item
+                kream_products_map[mn] = products
+
+        chunk_kream = sum(len(v) for v in kream_products_map.values())
+        total_kream += chunk_kream
+        logger.info(f"{chunk_label} Kream 수집 완료 — {chunk_kream}개")
+
+        # 차익 비교 후 누적
+        chunk_results = find_arbitrage(all_products, kream_products_map)
+        arbitrage_results.extend(chunk_results)
+        arbitrage_results.sort(key=lambda r: r.price_diff, reverse=True)
+
+        # 청크마다 파일 저장 (누적 결과)
+        try:
+            arb_dicts = []
+            for item in arbitrage_results:
+                d = asdict(item)
+                d["price_diff"] = f"{d['price_diff']:,}"
+                arb_dicts.append(d)
+            arb_output.write_text(
+                json.dumps(arb_dicts, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
+            )
+        except Exception as exc:
+            logger.error(f"arbitrage_results.json 저장 실패: {exc}")
+            raise
+
+        # 마지막 청크가 아니면 30분 대기
+        if chunk_idx < len(model_chunks) - 1:
+            logger.info(
+                f"{chunk_label} 완료 — 다음 청크까지 {KREAM_CHUNK_INTERVAL_SEC // 60}분 대기..."
+            )
+            await asyncio.sleep(KREAM_CHUNK_INTERVAL_SEC)
 
     # =========================================================================
     # STEP 4: 이전 날짜 대비 변경분 비교 (전체 크롤 날짜 / full 모드에만 실행)

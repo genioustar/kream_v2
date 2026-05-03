@@ -6,11 +6,12 @@ SEARCH_URLS = [
     {"site_name": "stellastore", "url": "https://smartstore.naver.com/stellastore/best?cp=1", "type": "smart_store"},
     {"site_name": "artemoa", "url": "https://smartstore.naver.com/artemoa/category/4189ca0f9ee448be913cd0123f7fd0e3?cp=1", "type": "smart_store"},
     {"site_name": "burningwear", "url": "https://smartstore.naver.com/burningwear/best?cp=1", "type": "smart_store"},
-    {"site_name": "reasonershop", "url": "https://smartstore.naver.com/reasonershop/category/9e4d920d708943489393d2ca83467562?cp=1", "type": "smart_store"}
+    {"site_name": "reasonershop", "url": "https://smartstore.naver.com/reasonershop/category/9e4d920d708943489393d2ca83467562?cp=1", "type": "smart_store"},
+    {"site_name": "adidas", "url": "https://brand.naver.com/adidas/best?cp=1", "type": "smart_store"}
 ]
 MIN_TRADE_COUNT = 100
 MIN_PRICE_DIFF = 10000
 KREAM_MAX_CONCURRENCY = 2
 OUTPUT_DIR = "output"
 #NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
-ADIDAS_SALE_URL = "https://www.adidas.co.kr/new_to_sale"
+ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"

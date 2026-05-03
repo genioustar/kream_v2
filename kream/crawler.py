@@ -309,14 +309,17 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     }""")
 
     total_found = len(cards_data)
-    process_count = min(total_found, MAX_RESULTS)
-    logger.info(f"[{model_name}] 검색 결과 {total_found}개 발견, {process_count}개 처리")
+    logger.info(f"[{model_name}] 검색 결과 {total_found}개 발견")
 
-    if process_count == 0:
+    if total_found >= 3:
+        logger.info(f"[{model_name}] 결과 {total_found}개 — 정확한 매칭 없음, 건너뜀")
+        return []
+
+    if total_found == 0:
         logger.warning(f"[{model_name}] 처리할 카드 없음")
         return []
 
-    for card in cards_data[:process_count]:
+    for card in cards_data:
         try:
             if not card["name"] or not card["priceStr"]:
                 logger.debug(f"[{model_name}] 상품명/가격 없음 — 건너뜀")

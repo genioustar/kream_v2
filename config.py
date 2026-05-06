@@ -10,7 +10,7 @@ SEARCH_URLS = [
     {"site_name": "adidas", "url": "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579&page=1#2-shopping-story-detail", "type": "smart_store"}
 ]
 MIN_TRADE_COUNT = 100
-MIN_PRICE_DIFF = 10000
+MIN_PRICE_DIFF = 1000
 KREAM_MAX_CONCURRENCY = 2
 OUTPUT_DIR = "output"
 #NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"

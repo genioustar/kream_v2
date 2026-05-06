@@ -12,6 +12,7 @@ python main.py --mode crawl   # 전체 크롤링 (Kream 제외)
 python main.py --mode kream   # Kream 검색만 (오늘자 *_products.json 사용)
 python -m adidas.crawler      # 아디다스 단독 크롤링
 python -m nike.crawler        # 나이키 단독 크롤링
+python -m special.crawler     # special 단독 크롤링
 ```
 
 ## 실행 흐름
@@ -20,12 +21,14 @@ python -m nike.crawler        # 나이키 단독 크롤링
 main.py --mode full (기본)
   │
   ├── STEP 1: 전체 사이트 크롤링
-  │     ├── naver/crawler.py  → output/YYYYMMDD/naver_products.json
+  │     ├── naver/crawler.py   → output/YYYYMMDD/naver_products.json
   │     │     각 사이트별 병렬 크롤링 (config.SEARCH_URLS)
-  │     ├── adidas/crawler.py → output/YYYYMMDD/adidas_products.json
+  │     ├── adidas/crawler.py  → output/YYYYMMDD/adidas_products.json
   │     │     Extra Sale 신발 전체 수집, Kids 카테고리 제외
-  │     └── nike/crawler.py   → output/YYYYMMDD/nike_products.json
-  │           세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
+  │     ├── nike/crawler.py    → output/YYYYMMDD/nike_products.json
+  │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
+  │     └── special/crawler.py → output/YYYYMMDD/special_products.json
+  │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (미설정 시 스킵)
   │     * 오늘자 파일이 이미 있으면 스킵
   │
   ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
@@ -66,6 +69,10 @@ resell-sniper/
 │   ├── __init__.py
 │   └── crawler.py        # crawl_nike() — 세일 신발 무한스크롤, NaverProduct 포맷 저장
 │
+├── special/              # 범용 적응형 크롤러
+│   ├── __init__.py
+│   └── crawler.py        # crawl_special() — SPECIAL_SALE_URL JS 휴리스틱 자동 탐지
+│
 ├── naver/                # 네이버 크롤러
 │   ├── crawler.py        # crawl_naver() — 사이트별 병렬 크롤링
 │   └── parser.py         # 네이버 HTML 파싱
@@ -80,6 +87,7 @@ resell-sniper/
 │   │   ├── naver_products.json
 │   │   ├── adidas_products.json
 │   │   ├── nike_products.json
+│   │   ├── special_products.json
 │   │   └── arbitrage_results.json
 │   ├── diff/
 │   │   └── YYYYMMDD_vs_YYYYMMDD/
@@ -122,6 +130,16 @@ resell-sniper/
 - `_extract_model_name(card_text, href)` — `_parse_api_product` 내 폴백. 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 3순위
 - `_should_exclude(card_text, subtitle)` — EXCLUDE_KEYWORDS("kids", "어린이", "유아", "주니어") 포함 여부 검사
 - 저장 포맷: `NaverProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
+
+### special/crawler.py
+- `crawl_special()` — `config.SPECIAL_SALE_URL` 페이지를 JS 휴리스틱으로 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). 미설정/빈 값이면 즉시 [] 반환. CDP 연결 실패 시 [] 반환 + error 로그.
+- `_JS_EXTRACT` — 3단계 휴리스틱으로 상품 카드 자동 탐지하는 JS 문자열
+  - 전략 1: `<li>` 요소 중 img + a[href] + 가격패턴 모두 포함한 것
+  - 전략 2: `<a[href]>` 요소 자체에 img + 가격패턴 포함한 것
+  - 전략 3: 가격 텍스트 leaf 요소에서 위로 올라가며 형제 2개 이상인 조상 탐색
+- `_to_naver_product(card, crawled_at)` — JS 추출 카드를 NaverProduct로 변환. model_name은 `extract_model_names(name)` 첫 결과, 없으면 code 사용.
+- 스크롤: `SCROLL_STEP_PX=800`, `SCROLL_STEP_DELAY_MS=1500`, scrollY 변화 없음 `NO_CHANGE_LIMIT(5)`회 연속 시 종료. seen_urls set으로 중복 제거.
+- 저장 포맷: `NaverProduct` (site_name="special") → `output/YYYYMMDD/special_products.json`
 
 ### adidas/crawler.py
 - `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kids 카테고리 자동 제외. 페이지네이션 처리. URL 출처: `config.ADIDAS_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
@@ -176,6 +194,7 @@ resell-sniper/
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
 | `NIKE_SALE_URL` | nike.com/kr/w/clearance-shoes | 나이키 성인 세일 신발 URL (빈 값/미설정 시 나이키 크롤링 스킵) |
 | `ADIDAS_SALE_URL` | adidas.co.kr/extra_sale-shoes | 아디다스 Extra Sale 신발 URL (빈 값/미설정 시 아디다스 크롤링 스킵) |
+| `SPECIAL_SALE_URL` | "" (사용자의 입력값) | 범용 적응형 크롤러 대상 URL (빈 값/미설정 시 special 크롤링 스킵) |
 
 ## 새 크롤링 소스 추가 방법
 

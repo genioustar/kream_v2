@@ -164,9 +164,13 @@ def diff_date_pair(
     for f in only_in_old:
         logger.info("'%s'는 %s에만 존재합니다 (비교 건너뜀)", f, old_date)
     for f in only_in_new:
-        logger.info("'%s'는 %s에만 존재합니다 (비교 건너뜀)", f, new_date)
+        if not f.endswith("_products.json"):
+            logger.info("'%s'는 %s에만 존재합니다 (비교 건너뜀)", f, new_date)
 
-    if not common_files:
+    # 신규 *_products.json: 비교 대상에 포함할 파일
+    new_only_products = {f for f in only_in_new if f.endswith("_products.json")}
+
+    if not common_files and not new_only_products:
         logger.warning("두 날짜에 공통으로 존재하는 JSON 파일이 없습니다.")
         return []
 
@@ -175,6 +179,26 @@ def diff_date_pair(
     diff_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths: list[Path] = []
+
+    # 신규 *_products.json 파일은 전체를 added로 처리하여 Kream 검색 대상에 포함
+    for filename in sorted(new_only_products):
+        key_fields = KEY_CONFIG.get(filename, DEFAULT_PRODUCTS_KEY)
+        logger.info("[%s] 신규 파일 — 전체 항목을 added로 처리", filename)
+        new_items = load_json_file(new_dir / filename)
+        result = compute_diff([], new_items, key_fields)
+        output = {
+            "old_date": old_date,
+            "new_date": new_date,
+            "source_file": filename,
+            "summary": result["summary"],
+            "changes": result["changes"],
+        }
+        stem = Path(filename).stem
+        out_path = diff_dir / f"{stem}_diff.json"
+        out_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        s = result["summary"]
+        logger.info("[%s] 완료 — 추가: %d → %s", filename, s["added"], out_path)
+        saved_paths.append(out_path)
 
     for filename in sorted(common_files):
         key_fields = KEY_CONFIG.get(filename)

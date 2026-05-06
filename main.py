@@ -30,6 +30,7 @@ from kream.comparator import find_arbitrage
 from kream.crawler import DELAY_MAX_SEC, DELAY_MIN_SEC, init_kream_page, search_kream, _human_wait
 from naver.crawler import crawl_naver
 from nike.crawler import crawl_nike
+from special.crawler import crawl_special
 
 # 네이버 전체 상품을 Kream에 조회하는 날짜 (그 외 날짜는 diff 기반으로 조회)
 FULL_CRAWL_DAYS: frozenset[int] = frozenset({1, 10, 20, 30})
@@ -176,6 +177,22 @@ async def main(mode: str) -> None:
                     logger.warning("나이키 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
             except Exception as exc:
                 logger.warning(f"나이키 크롤링 실패 (파이프라인은 계속): {exc}")
+
+        # special 크롤링
+        special_output = output_dir / "special_products.json"
+        if special_output.exists():
+            logger.info(f"오늘자 파일 존재 — special 크롤링 스킵: {special_output}")
+        else:
+            logger.info("SPECIAL_SALE_URL 크롤링 시작")
+            try:
+                special_products = await crawl_special()
+                if special_products:
+                    _save_json(special_products, special_output)
+                    logger.info(f"special 상품 {len(special_products)}개 저장 → {special_output}")
+                else:
+                    logger.warning("special 수집 결과 없음 — 파일 저장 생략")
+            except Exception as exc:
+                logger.warning(f"special 크롤링 실패 (파이프라인은 계속): {exc}")
 
         if mode == "crawl":
             all_products = _load_all_products(output_dir)

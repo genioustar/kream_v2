@@ -15,3 +15,4 @@ KREAM_MAX_CONCURRENCY = 2
 OUTPUT_DIR = "output"
 #NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
 ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
+SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"

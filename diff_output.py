@@ -5,7 +5,7 @@ diff_output.py
 실행 방법:
   python diff_output.py                               # 가장 최근 두 날짜 자동 비교
   python diff_output.py --old 20260324 --new 20260325  # 날짜 직접 지정
-  python diff_output.py --file naver_products.json     # 특정 파일만 비교
+  python diff_output.py --file marketplace_products.json     # 특정 파일만 비교
 """
 import argparse
 import json
@@ -26,11 +26,11 @@ logger = get_logger("diff_output")
 
 # JSON 파일별 복합 비교 키 필드 (명시적으로 등록된 파일)
 KEY_CONFIG: dict[str, tuple[str, ...]] = {
-    "naver_products.json": ("model_name", "site_name"),
+    "marketplace_products.json": ("model_name", "site_name"),
 }
 
 # *_products.json 중 KEY_CONFIG에 없는 파일에 적용되는 기본 키
-# NaverProduct 포맷을 공유하는 모든 소스(adidas 등)에 적용 가능
+# MarketplaceProduct 포맷을 공유하는 모든 소스(adidas 등)에 적용 가능
 DEFAULT_PRODUCTS_KEY: tuple[str, ...] = ("model_name", "site_name")
 
 # 항상 다른 타임스탬프 필드는 비교에서 제외

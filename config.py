@@ -16,3 +16,11 @@ OUTPUT_DIR = "output"
 #NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
 ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
 SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"
+
+# 사이트별 수동 할인율 (%) — Kream 외 크롤러에 적용. 0이면 sale_price 미산출.
+SITE_DISCOUNT_RATES = {
+    "marketplace": 0,
+    "adidas": 30,
+    "nike": 0,
+    "special": 0,
+}

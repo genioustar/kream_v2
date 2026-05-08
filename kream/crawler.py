@@ -404,12 +404,12 @@ if __name__ == "__main__":
     from common.browser import create_browser
 
     async def _main():
-        naver_json = Path(config.OUTPUT_DIR) / "naver_products.json"
-        if not naver_json.exists():
-            print(f"오류: {naver_json} 파일이 없습니다. 먼저 naver 크롤러를 실행하세요.")
+        marketplace_json = Path(config.OUTPUT_DIR) / "marketplace_products.json"
+        if not marketplace_json.exists():
+            print(f"오류: {marketplace_json} 파일이 없습니다. 먼저 marketplace 크롤러를 실행하세요.")
             return
 
-        data = json.loads(naver_json.read_text(encoding="utf-8"))
+        data = json.loads(marketplace_json.read_text(encoding="utf-8"))
         seen: set[str] = set()
         unique_models: list[str] = []
         for item in data:

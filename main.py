@@ -23,12 +23,12 @@ from pathlib import Path
 import config
 from common.browser import create_browser
 from common.logger import get_logger
-from common.models import NaverProduct
+from common.models import MarketplaceProduct
 from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
 from kream.comparator import find_arbitrage
 from kream.crawler import DELAY_MAX_SEC, DELAY_MIN_SEC, init_kream_page, search_kream, _human_wait
-from naver.crawler import crawl_naver
+from naver.crawler import crawl_marketplace
 from nike.crawler import crawl_nike
 from special.crawler import crawl_special
 
@@ -54,15 +54,15 @@ def _save_json(data: list, path: Path) -> None:
     )
 
 
-def _load_products_json(path: Path) -> list[NaverProduct]:
-    """*_products.json 파일을 NaverProduct 리스트로 복원한다."""
+def _load_products_json(path: Path) -> list[MarketplaceProduct]:
+    """*_products.json 파일을 MarketplaceProduct 리스트로 복원한다."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    return [NaverProduct(**item) for item in data]
+    return [MarketplaceProduct(**item) for item in data]
 
 
-def _load_all_products(output_dir: Path) -> list[NaverProduct]:
+def _load_all_products(output_dir: Path) -> list[MarketplaceProduct]:
     """output_dir 내 모든 *_products.json 을 로드하여 합산 반환한다."""
-    all_products: list[NaverProduct] = []
+    all_products: list[MarketplaceProduct] = []
     for fpath in sorted(output_dir.glob("*_products.json")):
         try:
             items = _load_products_json(fpath)
@@ -71,6 +71,15 @@ def _load_all_products(output_dir: Path) -> list[NaverProduct]:
         except Exception as exc:
             logger.warning(f"{fpath.name} 로드 실패 (건너뜀): {exc}")
     return all_products
+
+
+def _apply_sale_price(products: list[MarketplaceProduct], source_key: str) -> None:
+    """크롤러 결과에 SITE_DISCOUNT_RATES 의 할인율을 적용해 sale_price 를 부여한다."""
+    rate = config.SITE_DISCOUNT_RATES.get(source_key, 0)
+    if not rate:
+        return
+    for p in products:
+        p.sale_price = int(round(p.price * (1 - rate / 100)))
 
 
 def _extract_models_from_diff(diff_path: Path) -> list[str]:
@@ -131,19 +140,20 @@ async def main(mode: str) -> None:
         logger.info("=" * 60)
 
         # 네이버 크롤링
-        naver_output = output_dir / "naver_products.json"
-        if naver_output.exists():
-            logger.info(f"오늘자 파일 존재 — 네이버 크롤링 스킵: {naver_output}")
+        marketplace_output = output_dir / "marketplace_products.json"
+        if marketplace_output.exists():
+            logger.info(f"오늘자 파일 존재 — 네이버 크롤링 스킵: {marketplace_output}")
         else:
             try:
-                naver_products = await crawl_naver()
-                _save_json(naver_products, naver_output)
-                logger.info(f"네이버 상품 {len(naver_products)}개 저장 → {naver_output}")
+                marketplace_products = await crawl_marketplace()
+                _apply_sale_price(marketplace_products, "marketplace")
+                _save_json(marketplace_products, marketplace_output)
+                logger.info(f"네이버 상품 {len(marketplace_products)}개 저장 → {marketplace_output}")
             except RuntimeError as exc:
                 logger.error(f"네이버 크롤링 전체 실패: {exc}")
                 sys.exit(1)
             except Exception as exc:
-                logger.error(f"naver_products.json 저장 실패: {exc}")
+                logger.error(f"marketplace_products.json 저장 실패: {exc}")
                 raise
 
         # 아디다스 크롤링
@@ -155,6 +165,7 @@ async def main(mode: str) -> None:
             try:
                 adidas_products = await crawl_adidas()
                 if adidas_products:
+                    _apply_sale_price(adidas_products, "adidas")
                     _save_json(adidas_products, adidas_output)
                     logger.info(f"아디다스 상품 {len(adidas_products)}개 저장 → {adidas_output}")
                 else:
@@ -171,6 +182,7 @@ async def main(mode: str) -> None:
             try:
                 nike_products = await crawl_nike()
                 if nike_products:
+                    _apply_sale_price(nike_products, "nike")
                     _save_json(nike_products, nike_output)
                     logger.info(f"나이키 상품 {len(nike_products)}개 저장 → {nike_output}")
                 else:
@@ -187,6 +199,7 @@ async def main(mode: str) -> None:
             try:
                 special_products = await crawl_special()
                 if special_products:
+                    _apply_sale_price(special_products, "special")
                     _save_json(special_products, special_output)
                     logger.info(f"special 상품 {len(special_products)}개 저장 → {special_output}")
                 else:

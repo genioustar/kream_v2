@@ -9,7 +9,7 @@ from typing import Optional
 import config
 from common.browser import create_browser
 from common.logger import get_logger
-from common.models import NaverProduct
+from common.models import MarketplaceProduct
 from naver.parser import get_selectors, parse_price, extract_model_names, clean_url
 
 logger = get_logger("naver.crawler")
@@ -60,9 +60,9 @@ async def _extract_product(
     selectors: dict[str, str],
     site_name: str,
     crawled_at: str,
-) -> list[NaverProduct]:
+) -> list[MarketplaceProduct]:
     """
-    단일 상품 카드 Locator에서 NaverProduct 목록을 추출합니다.
+    단일 상품 카드 Locator에서 MarketplaceProduct 목록을 추출합니다.
     모델명이 "/" 로 여러 개인 경우 복수 반환합니다.
     오류 발생 시 빈 리스트를 반환합니다.
     """
@@ -99,7 +99,7 @@ async def _extract_product(
         model_names = extract_model_names(product_name)
 
         return [
-            NaverProduct(
+            MarketplaceProduct(
                 site_name=site_name,
                 product_name=product_name,
                 model_name=model_name,
@@ -115,7 +115,7 @@ async def _extract_product(
         return []
 
 
-async def _crawl_site(context, site_info: dict) -> list[NaverProduct]:
+async def _crawl_site(context, site_info: dict) -> list[MarketplaceProduct]:
     """
     단일 네이버 사이트(브랜드스토어 or 스마트스토어)를 크롤링합니다.
 
@@ -124,7 +124,7 @@ async def _crawl_site(context, site_info: dict) -> list[NaverProduct]:
         site_info: config.SEARCH_URLS의 단일 항목
 
     Returns:
-        수집된 NaverProduct 목록
+        수집된 MarketplaceProduct 목록
 
     Raises:
         RuntimeError: 페이지 로드 또는 상품 목록 추출에 완전히 실패한 경우
@@ -161,7 +161,7 @@ async def _crawl_site(context, site_info: dict) -> list[NaverProduct]:
 
         # 각 상품 카드 파싱
         items = page.locator(selectors["item"])
-        products: list[NaverProduct] = []
+        products: list[MarketplaceProduct] = []
         skip_count = 0
 
         for i in range(total_count):
@@ -181,12 +181,12 @@ async def _crawl_site(context, site_info: dict) -> list[NaverProduct]:
         await page.close()
 
 
-async def crawl_naver() -> list[NaverProduct]:
+async def crawl_marketplace() -> list[MarketplaceProduct]:
     """
     config.SEARCH_URLS에 정의된 모든 네이버 사이트를 병렬로 크롤링하여 상품을 수집합니다.
 
     Returns:
-        수집된 NaverProduct 전체 목록.
+        수집된 MarketplaceProduct 전체 목록.
         config.SEARCH_URLS 가 비어있거나 모든 항목의 url 이 누락이면 [] 반환.
 
     Raises:
@@ -194,7 +194,7 @@ async def crawl_naver() -> list[NaverProduct]:
     """
     search_urls = getattr(config, "SEARCH_URLS", None) or []
     if not search_urls:
-        logger.info("config.SEARCH_URLS 미설정/빈 목록 — 네이버 크롤링 건너뜀")
+        logger.info("config.SEARCH_URLS 미설정/빈 목록 — marketplace 크롤링 건너뜀")
         return []
 
     # 항목별 url 누락은 해당 사이트만 스킵, 나머지는 진행
@@ -209,14 +209,14 @@ async def crawl_naver() -> list[NaverProduct]:
         valid_sites.append(site_info)
 
     if not valid_sites:
-        logger.info("config.SEARCH_URLS 의 모든 항목에 url 이 없음 — 네이버 크롤링 건너뜀")
+        logger.info("config.SEARCH_URLS 의 모든 항목에 url 이 없음 — marketplace 크롤링 건너뜀")
         return []
 
     async with create_browser(headless=True) as context:
         tasks = [_crawl_site(context, site_info) for site_info in valid_sites]
         gather_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    all_products: list[NaverProduct] = []
+    all_products: list[MarketplaceProduct] = []
     failed_sites: list[str] = []
     for site_info, result in zip(valid_sites, gather_results):
         if isinstance(result, Exception):
@@ -229,7 +229,7 @@ async def crawl_naver() -> list[NaverProduct]:
         logger.warning(f"실패한 사이트: {failed_sites}")
 
     if not all_products and len(failed_sites) == len(valid_sites):
-        raise RuntimeError(f"모든 네이버 사이트 크롤링에 실패했습니다: {failed_sites}")
+        raise RuntimeError(f"모든 marketplace 사이트 크롤링에 실패했습니다: {failed_sites}")
 
     logger.info(f"전체 수집 완료 - 총 {len(all_products)}개 상품")
     return all_products
@@ -243,10 +243,10 @@ if __name__ == "__main__":
     from pathlib import Path
 
     async def main():
-        products = await crawl_naver()
+        products = await crawl_marketplace()
         out_dir = Path(config.OUTPUT_DIR)
         out_dir.mkdir(exist_ok=True)
-        out_path = out_dir / f"naver_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        out_path = out_dir / f"marketplace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         data = [
             {
                 "site_name": p.site_name,

@@ -1,7 +1,7 @@
 """
 special/crawler.py
 범용 적응형 크롤러 — config.SPECIAL_SALE_URL 에 지정된 임의의 쇼핑 페이지에서
-상품 카드를 JS 휴리스틱으로 자동 탐지하여 NaverProduct 목록을 반환한다.
+상품 카드를 JS 휴리스틱으로 자동 탐지하여 MarketplaceProduct 목록을 반환한다.
 
 사전 준비:
   chrome.py 로 Chrome CDP를 먼저 실행해야 한다.
@@ -9,7 +9,7 @@ special/crawler.py
 상품 수집 방식:
   1. CDP로 실제 Chrome에 연결
   2. 페이지 로드 후 스크롤하며 JS 휴리스틱 3단계 전략으로 상품 카드 자동 탐지
-  3. seen_urls set 으로 중복 제거하며 NaverProduct 변환
+  3. seen_urls set 으로 중복 제거하며 MarketplaceProduct 변환
 """
 import asyncio
 import json
@@ -21,7 +21,7 @@ from playwright.async_api import async_playwright
 
 import config
 from common.logger import get_logger
-from common.models import NaverProduct
+from common.models import MarketplaceProduct
 from naver.parser import extract_model_names
 
 logger = get_logger("special.crawler")
@@ -147,9 +147,9 @@ _JS_EXTRACT = """
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-def _to_naver_product(card: dict, crawled_at: str) -> NaverProduct | None:
+def _to_marketplace_product(card: dict, crawled_at: str) -> MarketplaceProduct | None:
     """
-    JS 휴리스틱이 추출한 카드 딕셔너리를 NaverProduct로 변환한다.
+    JS 휴리스틱이 추출한 카드 딕셔너리를 MarketplaceProduct로 변환한다.
 
     model_name 결정:
     - extract_model_names(name) 의 첫 번째 결과 사용
@@ -166,7 +166,7 @@ def _to_naver_product(card: dict, crawled_at: str) -> NaverProduct | None:
     model_names = extract_model_names(name)
     model_name  = model_names[0] if model_names else code
 
-    return NaverProduct(
+    return MarketplaceProduct(
         site_name    = SITE_NAME,
         product_name = name,
         model_name   = model_name,
@@ -180,16 +180,16 @@ def _to_naver_product(card: dict, crawled_at: str) -> NaverProduct | None:
 # 공개 API
 # ---------------------------------------------------------------------------
 
-async def crawl_special() -> list[NaverProduct]:
+async def crawl_special() -> list[MarketplaceProduct]:
     """
     config.SPECIAL_SALE_URL 페이지를 범용 JS 휴리스틱으로 크롤링하여
-    NaverProduct 목록을 반환한다.
+    MarketplaceProduct 목록을 반환한다.
 
     미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     CDP 연결 실패 시 [] 반환 + error 로그.
 
     Returns:
-        site_name='special' 인 NaverProduct 리스트.
+        site_name='special' 인 MarketplaceProduct 리스트.
     """
     special_url = getattr(config, "SPECIAL_SALE_URL", "") or ""
     if not special_url.strip():
@@ -228,14 +228,14 @@ async def crawl_special() -> list[NaverProduct]:
             await asyncio.sleep(PAGE_SETTLE_SEC)
 
             seen_urls: set[str] = set()
-            products: list[NaverProduct] = []
+            products: list[MarketplaceProduct] = []
 
             def _merge_cards(cards: list[dict]) -> None:
                 for card in cards:
                     url = card.get("url", "")
                     if not url or url in seen_urls:
                         continue
-                    p = _to_naver_product(card, crawled_at)
+                    p = _to_marketplace_product(card, crawled_at)
                     if p:
                         seen_urls.add(url)
                         products.append(p)

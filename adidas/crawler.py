@@ -22,7 +22,7 @@ from playwright.async_api import async_playwright
 
 import config
 from common.logger import get_logger
-from common.models import NaverProduct
+from common.models import MarketplaceProduct
 
 logger = get_logger("adidas.crawler")
 
@@ -125,15 +125,15 @@ async def _find_card_selector(page) -> str | None:
 
 
 
-async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> list[NaverProduct]:
+async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> list[MarketplaceProduct]:
     """
-    현재 페이지의 상품 카드를 파싱하여 NaverProduct 목록을 반환한다.
+    현재 페이지의 상품 카드를 파싱하여 MarketplaceProduct 목록을 반환한다.
     seen_codes 에 이미 있는 상품코드는 중복으로 간주해 건너뜀.
     """
     crawled_at = datetime.now().isoformat(timespec="seconds")
     cards_data: list[dict] = await page.evaluate(_JS_EXTRACT, card_selector)
 
-    products: list[NaverProduct] = []
+    products: list[MarketplaceProduct] = []
     for card in cards_data:
         if card["isKids"]:
             logger.debug(f"Kids 상품 제외: {card['name']!r}")
@@ -154,7 +154,7 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
             continue
 
         seen_codes.add(card["code"])
-        products.append(NaverProduct(
+        products.append(MarketplaceProduct(
             site_name=SITE_NAME,
             product_name=card["name"],
             model_name=card["code"],
@@ -173,7 +173,7 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
 # 공개 API
 # ---------------------------------------------------------------------------
 
-async def crawl_adidas() -> list[NaverProduct]:
+async def crawl_adidas() -> list[MarketplaceProduct]:
     """
     실제 크롬(CDP)에 연결하여 아디다스 Extra Sale 신발 페이지를 크롤링한다.
 
@@ -181,7 +181,7 @@ async def crawl_adidas() -> list[NaverProduct]:
     실행 전 크롬을 --remote-debugging-port=9222 로 먼저 실행해야 한다.
 
     Returns:
-        NaverProduct 포맷으로 수집된 아디다스 상품 목록.
+        MarketplaceProduct 포맷으로 수집된 아디다스 상품 목록.
         config.ADIDAS_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     """
     sale_url = getattr(config, "ADIDAS_SALE_URL", "") or ""
@@ -193,7 +193,7 @@ async def crawl_adidas() -> list[NaverProduct]:
     # 예) /extra_sale-shoes?sort=... → "extra_sale-shoes"
     expected_segment = urlparse(sale_url).path.rstrip("/").rsplit("/", 1)[-1]
 
-    all_products: list[NaverProduct] = []
+    all_products: list[MarketplaceProduct] = []
 
     pw = await async_playwright().start()
     try:

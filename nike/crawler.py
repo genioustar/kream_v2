@@ -25,7 +25,7 @@ from playwright.async_api import Page, async_playwright
 
 import config
 from common.logger import get_logger
-from common.models import NaverProduct
+from common.models import MarketplaceProduct
 
 logger = get_logger("nike.crawler")
 
@@ -64,7 +64,7 @@ API_BASE_URL = (
 async def _collect_via_api(
     page: Page,
     target_count: int = TARGET_PRODUCT_COUNT,
-) -> list[NaverProduct]:
+) -> list[MarketplaceProduct]:
     """
     Nike product_wall API 응답을 인터셉트하며 스크롤로 상품을 수집한다.
 
@@ -76,7 +76,7 @@ async def _collect_via_api(
     - 목표 수집 수 달성
     - scrollY 변화 없음 NO_CHANGE_LIMIT회 연속 (페이지 끝)
     """
-    seen: dict[str, NaverProduct] = {}
+    seen: dict[str, MarketplaceProduct] = {}
     crawled_at = datetime.now().isoformat(timespec="seconds")
     log_first = True
 
@@ -166,9 +166,9 @@ def _extract_model_name(card_text: str, href: str | None) -> str | None:
     return None
 
 
-def _parse_api_product(item: dict, crawled_at: str) -> NaverProduct | None:
+def _parse_api_product(item: dict, crawled_at: str) -> MarketplaceProduct | None:
     """
-    Nike product_wall API 응답의 상품 항목을 NaverProduct로 변환한다.
+    Nike product_wall API 응답의 상품 항목을 MarketplaceProduct로 변환한다.
 
     실제 API 필드 구조:
     - copy.title       → 상품명
@@ -202,7 +202,7 @@ def _parse_api_product(item: dict, crawled_at: str) -> NaverProduct | None:
             or title
         )
 
-        return NaverProduct(
+        return MarketplaceProduct(
             site_name=SITE_NAME,
             product_name=title,
             model_name=model_name,
@@ -231,15 +231,15 @@ def _should_exclude(card_text: str, subtitle: str | None) -> bool:
 # 공개 API
 # ---------------------------------------------------------------------------
 
-async def crawl_nike() -> list[NaverProduct]:
+async def crawl_nike() -> list[MarketplaceProduct]:
     """
-    나이키 코리아 세일 신발 페이지를 크롤링하여 NaverProduct 목록을 반환한다.
+    나이키 코리아 세일 신발 페이지를 크롤링하여 MarketplaceProduct 목록을 반환한다.
 
     Kasada 우회를 위해 실제 Chrome CDP에 연결한다 (make chrome 선행 필요).
     스크롤로 product_wall API 호출을 유도하고 응답을 인터셉트해 파싱한다.
 
     Returns:
-        site_name='nike' 인 NaverProduct 리스트. 연결 실패 또는 빈 결과 시 [] 반환.
+        site_name='nike' 인 MarketplaceProduct 리스트. 연결 실패 또는 빈 결과 시 [] 반환.
         config.NIKE_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     """
     sale_url = getattr(config, "NIKE_SALE_URL", "") or ""

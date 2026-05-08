@@ -21,7 +21,7 @@ tools:
 - 판정: **PASS** / **FAIL**(재작업 필요) / **FLAG**(개선 권고)
 
 ## 검증 기준
-- `NaverProduct` 포맷 준수 여부
+- `MarketplaceProduct` 포맷 준수 여부
 - CDP 연결 패턴 일치 (nike/adidas 참고)
 - config.SPECIAL_SALE_URL 미설정 시 스킵 처리
 - scrollY 기반 종료 조건 올바른지

@@ -1,5 +1,23 @@
 # 변경 히스토리
 
+## 2026-05-08 — 비교 맥락 식별자 naver → marketplace 일괄 변경
+
+- `common/models.py`: `NaverProduct` → `MarketplaceProduct` (클래스명), `ArbitrageResult` 필드 `naver_site/price/url` → `marketplace_site/price/url`
+- `kream/comparator.py`: 파라미터·루프 변수·ArbitrageResult 키워드 인자 전체 marketplace 로 통일
+- `main.py`: import, 변수명(`naver_output/products`→`marketplace_output/products`), 파일명(`marketplace_products.json`), `_apply_sale_price` 두 번째 인자(`"marketplace"`)
+- `config.py`: `SITE_DISCOUNT_RATES["naver"]` → `["marketplace"]`
+- `diff_output.py`: `KEY_CONFIG` 키 `naver_products.json` → `marketplace_products.json`
+- `kream/crawler.py`, `adidas/crawler.py`, `nike/crawler.py`, `special/crawler.py`: `NaverProduct` → `MarketplaceProduct`
+- `special/crawler.py`: `from naver.parser` → `from marketplace.parser`, `_to_naver_product` → `_to_marketplace_product`
+- `marketplace/` 디렉토리(구 `naver/`)는 실제 네이버 크롤러이므로 내부 로직 유지
+
+## 2026-05-07 — sale_price 도입 — 사이트별 수동 할인율 적용 후 Kream 차익 비교에 effective price 사용
+
+- `config.py`: `SITE_DISCOUNT_RATES` 딕셔너리 추가 (naver·adidas·nike·special 각 0%). 0이면 sale_price 미산출.
+- `common/models.py`: `NaverProduct`에 `sale_price: Optional[int] = None` 필드 추가. default=None으로 과거 JSON 호환 보장.
+- `main.py`: `_apply_sale_price(products, source_key)` 헬퍼 추가. STEP 1 각 크롤러 호출 직후 저장 직전 호출. naver 9개 스토어 모두 단일 "naver" 할인율 적용.
+- `kream/comparator.py`: `_effective_price(p)` 헬퍼 추가. `find_arbitrage`에서 naver.price 대신 effective price 사용. ArbitrageResult.naver_price·price_diff 모두 effective price 기준으로 산출.
+
 ## 2026-05-04 — SPECIAL_SALE_URL 범용 크롤러 추가 및 Kream 검색 연동 수정
 
 - `special/crawler.py` 신규: `config.SPECIAL_SALE_URL`에 지정된 임의 쇼핑 페이지를 CDP로 크롤링. JS 휴리스틱(li → a → leaf 조상 3단계 전략)으로 상품 카드 자동 탐지, scrollY 변화 없음 5회 연속 시 종료.

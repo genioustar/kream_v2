@@ -16,7 +16,7 @@ tools:
 ## 역할
 - 요구사항에 따라 코드를 작성하고 파일을 생성·수정한다.
 - 구현 완료 후 스스로 검증하지 않는다 (Evaluator가 담당).
-- `common/models.py`의 `NaverProduct` 포맷을 반드시 준수한다.
+- `common/models.py`의 `MarketplaceProduct` 포맷을 반드시 준수한다.
 - CDP 연결 패턴은 `nike/crawler.py`와 `adidas/crawler.py`를 참고한다.
 - `ARCHITECTURE.md`를 코드 변경과 동시에 업데이트한다.
 

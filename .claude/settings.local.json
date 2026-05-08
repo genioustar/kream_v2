@@ -11,13 +11,12 @@
       "Bash(tmux list-panes:*)",
       "Bash(tmux kill-pane:*)",
       "Bash(python3 -m venv venv)",
-      "Bash(kill 40161:*)",
-      "Bash(claude mcp *)",
-      "Bash(python3 -m json.tool)"
+      "Bash(kill 40161:*)"
     ]
   },
   "model": "opusplan",
-  "outputStyle": "Explanatory",
   "teammateMode": "tmux",
-  "dangerouslySkipPermissions": true
+  "dangerouslySkipPermissions": true,
+  "outputStyle": "Explanatory",
+  "plansDirectory": "./plans"
 }

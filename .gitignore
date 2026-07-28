@@ -15,6 +15,7 @@ output/
 
 # 로그
 logs/
+.playwright-mcp/
 
 # 환경 설정
 .env

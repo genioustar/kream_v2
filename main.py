@@ -28,6 +28,7 @@ from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
 from kream.comparator import find_arbitrage
 from kream.crawler import DELAY_MAX_SEC, DELAY_MIN_SEC, init_kream_page, search_kream, _human_wait
+from musinsa.crawler import crawl_musinsa
 from naver.crawler import crawl_marketplace
 from nike.crawler import crawl_nike
 from special.crawler import crawl_special
@@ -172,6 +173,23 @@ async def main(mode: str) -> None:
                     logger.warning("아디다스 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
             except Exception as exc:
                 logger.warning(f"아디다스 크롤링 실패 (파이프라인은 계속): {exc}")
+
+        # 무신사 크롤링
+        musinsa_output = output_dir / "musinsa_products.json"
+        if musinsa_output.exists():
+            logger.info(f"오늘자 파일 존재 — 무신사 크롤링 스킵: {musinsa_output}")
+        else:
+            logger.info("무신사 상품 크롤링 시작")
+            try:
+                musinsa_products = await crawl_musinsa()
+                if musinsa_products:
+                    _apply_sale_price(musinsa_products, "musinsa")
+                    _save_json(musinsa_products, musinsa_output)
+                    logger.info(f"무신사 상품 {len(musinsa_products)}개 저장 → {musinsa_output}")
+                else:
+                    logger.warning("무신사 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
+            except Exception as exc:
+                logger.warning(f"무신사 크롤링 실패 (파이프라인은 계속): {exc}")
 
         # 나이키 크롤링
         nike_output = output_dir / "nike_products.json"

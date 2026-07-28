@@ -1,5 +1,27 @@
 # 변경 히스토리
 
+## 2026-07-28 — 사이트별 모델명 추출 전략 통합
+
+- [모델명 추출] `common/model_names.py`를 공통 추출기로 추가하고 괄호·슬래시·후행·본문 코드, 숫자-only 코드, 공백 복합 SKU, 복수 대체 모델을 사이트별 전략(`bracket_first`, `slash_first`, `suffix_single`, `suffix_grouped`, `auto`)에 따라 처리한다. 시즌·사이즈·수량·용량 표기는 공통 오탐 필터로 제외한다.
+  - SUPERSEDED: 무신사 모델명을 대문자+숫자 스타일코드의 마지막 값만으로 추출 — 실제 아울렛 상품의 괄호 숫자 코드, 슬래시 코드, 후행 코드, 목록용 보조번호 표기를 누락해 공통 `slash_first` 전략으로 교체했다.
+- [네이버·special 연동] `config.SEARCH_URLS[*].model_strategy`와 `SPECIAL_MODEL_STRATEGY`를 추가하고, 네이버 및 special 크롤러가 추출된 복수 모델을 각각 `MarketplaceProduct`로 저장하도록 통일했다.
+- [네이버 수동 복구] 네이버는 실제 Chrome 채널·전용 `naver_cookies.json`을 사용한다. 상품 목록이 15초 내 나타나지 않으면 브라우저에서 로그인·보안 확인을 마친 뒤 Enter를 누를 때까지 사이트별로 대기하고, `q` 입력 시 해당 사이트만 중단한다.
+- [무신사 URL] `/brand/{slug}` PLP와 현재 설정된 `/main/.../ranking`을 모두 지원하며, 랭킹 API의 `link.next`를 따라 수집한다.
+  - SUPERSEDED: 무신사 크롤러가 브랜드 PLP URL만 지원 — 실제 설정 URL이 아울렛 랭킹으로 바뀌어 URL 형식별 API 분기로 확장했다.
+- [검증] 실제 스토어 표기에서 수집한 괄호·마지막 슬래시·복합 SKU·숫자 대체 코드와 `230~250MM`·`2way` 오탐, 수동 입력 재개 경로를 `tests/test_model_names.py`에 고정했다.
+
+## 2026-06-24 — smart_store 품절 상품 Kream 조회 제외
+
+- `naver/crawler.py`: `smart_store` 상품 카드에서 `품절` 오버레이 또는 `일시품절` 배송 문구를 감지하면 수집하지 않도록 `_is_sold_out_product()` 추가.
+- 품절 상품은 `marketplace_products.json`에 저장되지 않으므로 Kream 검색 대상에서도 자동 제외된다. `brand_store` 타입은 기존 동작을 유지한다.
+
+## 2026-06-20 — 무신사 브랜드 PLP API 크롤러 추가
+
+- `musinsa/crawler.py` 신규: `config.MUSINSA_SALE_URL`에서 brand slug와 query를 추출해 `api2/dp/v2/plp/goods`를 호출하고, `pagination.nextPageUrl`의 `hmacId`를 따라 전체 페이지를 수집한다.
+- 무신사 가격은 DOM 카드에 표시되는 `finalPrice`를 우선 사용하고, 모델명은 대문자+숫자 스타일코드 패턴의 마지막 값을 우선 추출한다. 품절 상품과 모델코드 미추출 상품은 제외한다.
+- `config.py`: 무신사 아디다스 무진장 캠페인 URL과 `SITE_DISCOUNT_RATES["musinsa"] = 0` 추가.
+- `main.py`: STEP 1에 무신사 크롤링 블록 추가 (`musinsa_products.json` 저장). diff/Kream 검색은 기존 `*_products.json` 자동 로드 경로를 재사용한다.
+
 ## 2026-05-08 — 비교 맥락 식별자 naver → marketplace 일괄 변경
 
 - `common/models.py`: `NaverProduct` → `MarketplaceProduct` (클래스명), `ArbitrageResult` 필드 `naver_site/price/url` → `marketplace_site/price/url`
@@ -8,8 +30,8 @@
 - `config.py`: `SITE_DISCOUNT_RATES["naver"]` → `["marketplace"]`
 - `diff_output.py`: `KEY_CONFIG` 키 `naver_products.json` → `marketplace_products.json`
 - `kream/crawler.py`, `adidas/crawler.py`, `nike/crawler.py`, `special/crawler.py`: `NaverProduct` → `MarketplaceProduct`
-- `special/crawler.py`: `from naver.parser` → `from marketplace.parser`, `_to_naver_product` → `_to_marketplace_product`
-- `marketplace/` 디렉토리(구 `naver/`)는 실제 네이버 크롤러이므로 내부 로직 유지
+- `special/crawler.py`: 공통 상품 타입을 `MarketplaceProduct`로 통일하고, 모델명 추출은 현재 `common.model_names`를 사용한다.
+- `naver/` 디렉터리는 실제 네이버 크롤러이므로 유지하고 공통 데이터 타입·필드명만 `marketplace` 문맥으로 변경했다.
 
 ## 2026-05-07 — sale_price 도입 — 사이트별 수동 할인율 적용 후 Kream 차익 비교에 effective price 사용
 

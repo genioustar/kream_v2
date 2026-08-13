@@ -28,6 +28,14 @@ NAVER_COOKIE_FILE = (
     / "session"
     / "naver_cookies.json"
 )
+SKIP_REASON_SOLD_OUT = "품절"
+SKIP_REASON_MODEL_MISSING = "모델명 없음"
+SKIP_REASON_PARSE_ERROR = "파싱 오류"
+SKIP_REASONS = (
+    SKIP_REASON_SOLD_OUT,
+    SKIP_REASON_MODEL_MISSING,
+    SKIP_REASON_PARSE_ERROR,
+)
 
 
 async def _wait_for_product_list(
@@ -159,23 +167,24 @@ async def _extract_product(
     store_type: str,
     model_strategy: str,
     crawled_at: str,
-) -> list[MarketplaceProduct]:
+) -> tuple[list[MarketplaceProduct], str | None]:
     """
-    단일 상품 카드 Locator에서 MarketplaceProduct 목록을 추출합니다.
+    단일 상품 카드 Locator에서 상품 목록과 건너뜀 사유를 추출합니다.
     사이트의 model_strategy에 따라 괄호/슬래시/후행 코드를 해석하며,
     대체 모델이 여러 개인 경우 복수 반환합니다.
-    오류 발생 시 빈 리스트를 반환합니다.
+    성공 시 건너뜀 사유는 None이고, 실패 시 품절/모델명 없음/파싱 오류 중
+    하나를 반환합니다.
     """
     try:
         if await _is_sold_out_product(item, store_type):
             logger.debug(f"[{site_name}] 품절 상품 제외")
-            return []
+            return [], SKIP_REASON_SOLD_OUT
 
         # 상품명
         name_el = item.locator(selectors["name"]).first
         product_name = (await name_el.inner_text()).strip()
         if not product_name:
-            return []
+            raise ValueError("상품명 없음")
 
         # 가격 - fallback 셀렉터 리스트를 순서대로 시도
         price_candidates = selectors["price"]
@@ -201,22 +210,28 @@ async def _extract_product(
 
         # 모델명 목록 추출 (복수 가능)
         model_names = extract_model_names(product_name, strategy=model_strategy)
+        if not model_names:
+            logger.debug(f"[{site_name}] 모델명 없음 (건너뜀): {product_name}")
+            return [], SKIP_REASON_MODEL_MISSING
 
-        return [
-            MarketplaceProduct(
-                site_name=site_name,
-                product_name=product_name,
-                model_name=model_name,
-                price=price,
-                url=product_url,
-                crawled_at=crawled_at,
-            )
-            for model_name in model_names
-        ]
+        return (
+            [
+                MarketplaceProduct(
+                    site_name=site_name,
+                    product_name=product_name,
+                    model_name=model_name,
+                    price=price,
+                    url=product_url,
+                    crawled_at=crawled_at,
+                )
+                for model_name in model_names
+            ],
+            None,
+        )
 
     except Exception as exc:
         logger.debug(f"상품 파싱 실패 (건너뜀): {exc}")
-        return []
+        return [], SKIP_REASON_PARSE_ERROR
 
 
 async def _crawl_site(
@@ -281,11 +296,11 @@ async def _crawl_site(
         # 각 상품 카드 파싱
         items = page.locator(selectors["item"])
         products: list[MarketplaceProduct] = []
-        skip_count = 0
+        skip_counts = {reason: 0 for reason in SKIP_REASONS}
 
         for i in range(total_count):
             item = items.nth(i)
-            extracted = await _extract_product(
+            extracted, skip_reason = await _extract_product(
                 item,
                 selectors,
                 site_name,
@@ -295,11 +310,17 @@ async def _crawl_site(
             )
             if extracted:
                 products.extend(extracted)
-            else:
-                skip_count += 1
+            elif skip_reason is not None:
+                skip_counts[skip_reason] += 1
 
+        skip_count = sum(skip_counts.values())
+        skip_details = ", ".join(
+            f"{reason}: {skip_counts[reason]}개"
+            for reason in SKIP_REASONS
+        )
         logger.info(
-            f"[{site_name}] 파싱 완료 - 성공: {len(products)}개, 건너뜀: {skip_count}개"
+            f"[{site_name}] 파싱 완료 - 성공: {len(products)}개, "
+            f"건너뜀: {skip_count}개 ({skip_details})"
         )
         return products
 

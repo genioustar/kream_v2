@@ -1,9 +1,25 @@
+## 빠른 시작
+
+```bash
+# 의존성 설치 (최초 1회)
+pip install -r requirements.txt
+playwright install chromium
+
+# Chrome CDP 실행 (나이키·아디다스·special 크롤러 필수 — 별도 터미널)
+python chrome.py
+
+# 파이프라인 실행
+python main.py                 # full (기본): 크롤링 + Kream 차익 검색
+python main.py --mode crawl    # 크롤링만 (Kream 검색 없음)
+python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재사용)
+```
+
 ## Git 커밋·푸시 금지 원칙
 - **에이전트는 절대로 `git commit`, `git push`를 실행하지 않는다.**
 - 코드·문서 변경 작업이 완료되면 변경된 파일 목록과 내용을 사용자에게 보고하고, 커밋·푸시는 사용자가 직접 수행한다.
 - 사용자가 명시적으로 "커밋해줘", "푸시해줘"라고 요청한 경우에만 예외적으로 실행할 수 있다.
 
-## agnet team으로 작업할때 작업 원칙
+## agent team으로 작업할때 작업 원칙
 - 각 팀원이 변경하기 전에 plan approval을 받아야함.
 
 ## 소스수정원칙
@@ -28,8 +44,8 @@
 - 문서에는 **현재 호출되고 있는** 함수만 기술한다. 정의만 되고 호출되지 않는 코드는 문서에서 제외 후 제거.
 - 디렉토리 트리는 실제 `ls` 결과와 일치해야 한다. 사라진 파일·새 파일 반영 필수.
 
-### 4. 뒤집힌 결정은 .planning/STATE.md 에 명시적으로 SUPERSEDED 처리한다
-- `## Decisions` 항목 중 실제 코드가 반대로 구현된 것이 발견되면, 삭제하지 말고 다음 형식으로 덮어쓴다:
+### 4. 뒤집힌 결정은 history.md 에 명시적으로 SUPERSEDED 처리한다
+- 구현 방식이 이전 결정과 반대로 바뀐 것이 발견되면, 삭제하지 말고 다음 형식으로 history.md에 기록한다:
   ```
   - [영역] 새 결정 — 사유
     - SUPERSEDED: 기존 결정 내용 — 뒤집힌 이유
@@ -44,7 +60,7 @@
 - [ ] 새로 추가·제거한 함수/상수가 ARCHITECTURE.md에 반영되었는가
 - [ ] 주석 처리된 코드(`# 구버전`, `# 사용 안함` 등)가 남아있지 않은가
 - [ ] history.md 의 최신 항목이 실제 코드 상태와 일치하는가
-- [ ] STATE.md 의 Decisions 가 현재 구현 방식과 모순되지 않는가
+- [ ] history.md 에 SUPERSEDED 처리해야 할 뒤집힌 결정이 없는가
 
 ## 크롤러 검증 시 Playwright MCP 활용 규칙
 
@@ -57,7 +73,7 @@ claude mcp add playwright npx @playwright/mcp@latest
 설치 후 `/mcp` 로 connected 상태 확인.
 
 ### 세션 공유 원칙
-- MCP 브라우저와 크롤러는 `chrome-debug.sh` 세션(포트 9222)을 **순차 공유**한다 (동시 사용 금지 — 포트 충돌·세션 오염).
+- MCP 브라우저와 크롤러는 `chrome.py` 세션(포트 9222)을 **순차 공유**한다 (동시 사용 금지 — 포트 충돌·세션 오염).
 - 검증은 크롤러 실행이 **종료된 후** 시작한다.
 - 쿠키·fingerprint 오염을 줄이기 위해 **수정된 크롤러만** 대상으로 검증한다 (전체 사이트 일괄 검증 금지).
 

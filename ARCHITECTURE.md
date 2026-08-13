@@ -211,8 +211,8 @@ resell-sniper/
 - 페이지 생성은 `common.browser.new_stealth_page()`를 사용한다.
 - `_wait_for_product_list(page, item_selector, site_name, manual_input_lock)` — 상품 목록이 15초 내 나타나지 않으면 열린 Chrome에서 로그인·보안 확인을 마친 사용자의 Enter 입력을 기다린다. 병렬 프롬프트는 잠금으로 직렬화하고 `q` 입력 시 해당 사이트를 중단한다.
 - `_scroll_to_bottom(page, item_selector)` — 무한스크롤 처리
-- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at)` — 단일 상품 카드 파싱. smart_store 품절 상품은 상품명/가격 파싱 전에 제외하고, 사이트 전략으로 모델명을 복수 변환한다.
-- `_crawl_site(context, site_info, manual_input_lock)` — 단일 사이트 크롤링. `site_info.model_strategy`를 추출기에 전달하며 미설정 시 `auto`; 지원하지 않는 값은 크롤링 전에 해당 사이트 설정 오류로 처리.
+- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at)` — 단일 상품 카드 파싱. 성공 시 상품 목록과 `None`을, 건너뛸 때는 빈 목록과 `품절`·`모델명 없음`·`파싱 오류` 중 하나를 반환한다. 사이트 전략으로 모델명을 복수 변환한다.
+- `_crawl_site(context, site_info, manual_input_lock)` — 단일 사이트 크롤링. `site_info.model_strategy`를 추출기에 전달하며 미설정 시 `auto`; 지원하지 않는 값은 크롤링 전에 해당 사이트 설정 오류로 처리한다. 완료 로그는 총 건너뜀 수와 품절·모델명 없음·파싱 오류별 건수를 함께 출력한다.
 - `crawl_marketplace()` — config.SEARCH_URLS 대상 병렬 크롤링. SEARCH_URLS 가 비어있거나 유효한 url 항목이 하나도 없으면 [] 반환. 항목별 url 누락 시 해당 사이트만 스킵하고 나머지는 진행.
 
 ### common/models.py

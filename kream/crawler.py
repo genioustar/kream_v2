@@ -14,7 +14,14 @@ import time
 from common.browser import new_stealth_page
 from common.logger import get_logger
 from common.models import KreamProduct
-from kream.parser import KREAM_SELECTORS, parse_kream_price, parse_trade_count
+from kream.parser import (
+    KREAM_SELECTORS,
+    model_numbers_match,
+    parse_kream_model_number,
+    parse_kream_model_number_html,
+    parse_kream_price,
+    parse_trade_count,
+)
 
 logger = get_logger("kream.crawler")
 
@@ -155,6 +162,119 @@ async def _is_blocked_page(page) -> bool:
         return True
 
 
+async def _load_detail_model_number(page, product_url: str) -> str | None:
+    """
+    Kream 상품 상세 페이지로 이동하여 실제 모델번호를 읽는다.
+
+    모델번호 DOM이 없거나 파싱할 수 없으면 오탐 저장을 막기 위해 None을 반환한다.
+    """
+    response = None
+    try:
+        response = await page.goto(
+            product_url,
+            wait_until="domcontentloaded",
+            timeout=PAGE_LOAD_TIMEOUT,
+        )
+    except Exception as exc:
+        # Kream은 일부 리소스 오류 때문에 navigation 예외가 나도 본문이 렌더링될 수 있다.
+        logger.debug(
+            f"Kream 상세 페이지 goto 에러(모델번호 확인 계속): "
+            f"url={product_url}, error={type(exc).__name__}"
+        )
+
+    if response is not None:
+        try:
+            model_number = parse_kream_model_number_html(await response.text())
+            if model_number:
+                return model_number
+        except Exception as exc:
+            logger.debug(
+                f"Kream 상세 HTML 모델번호 파싱 실패(DOM 폴백): "
+                f"url={product_url}, error={type(exc).__name__}"
+            )
+
+    # SSR HTML에서 찾지 못한 경우에만 SPA가 만든 DOM을 폴백으로 확인한다.
+    try:
+        await page.wait_for_selector(
+            KREAM_SELECTORS["detail_model_number"],
+            state="attached",
+            timeout=SELECTOR_TIMEOUT,
+        )
+        texts = await page.locator(
+            KREAM_SELECTORS["detail_model_number"]
+        ).all_text_contents()
+    except Exception as exc:
+        logger.warning(
+            f"Kream 상세 모델번호 확인 실패: url={product_url}, "
+            f"error={type(exc).__name__}"
+        )
+        return None
+
+    for text in texts:
+        model_number = parse_kream_model_number(text)
+        if model_number:
+            return model_number
+
+    logger.warning(f"Kream 상세 모델번호 파싱 실패: url={product_url}")
+    return None
+
+
+async def _find_verified_kream_product(
+    model_name: str,
+    cards_data: list[dict],
+    page,
+) -> KreamProduct | None:
+    """검색 후보 상세를 순서대로 확인해 모델번호가 정확히 맞는 첫 상품을 반환한다."""
+    for card in cards_data[:MAX_RESULTS]:
+        try:
+            if not card["name"] or not card["priceStr"] or not card["href"]:
+                logger.debug(f"[{model_name}] 상품명/가격/URL 없음 — 건너뜀")
+                continue
+
+            actual_model_number = await _load_detail_model_number(page, card["href"])
+            if actual_model_number is None:
+                logger.warning(
+                    f"[{model_name}] 실제 모델번호를 확인할 수 없음 — "
+                    f"url={card['href']} 건너뜀"
+                )
+                continue
+
+            if not model_numbers_match(model_name, actual_model_number):
+                logger.info(
+                    f"[{model_name}] Kream 실제 모델번호 불일치 — "
+                    f"actual={actual_model_number!r}, url={card['href']} 건너뜀"
+                )
+                continue
+
+            kream_price = parse_kream_price(card["priceStr"])
+            trade_count = (
+                parse_trade_count(card["tradeStr"])
+                if card["tradeStr"]
+                else 0
+            )
+            product = KreamProduct(
+                model_name=actual_model_number,
+                kream_name=card["name"],
+                kream_price=kream_price,
+                trade_count=trade_count,
+                kream_url=card["href"],
+            )
+            logger.info(
+                f"[{model_name}] 모델번호 검증 완료: actual={actual_model_number!r}, "
+                f"{card['name']!r}, 가격={kream_price:,}원, 거래량={trade_count}"
+            )
+            return product
+
+        except Exception as exc:
+            logger.warning(f"[{model_name}] 후보 검증 실패: {exc} — 건너뜀")
+
+    logger.info(
+        f"[{model_name}] 상위 {min(len(cards_data), MAX_RESULTS)}개 후보 중 "
+        "실제 모델번호가 일치하는 상품 없음"
+    )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 페이지 초기화 (메인 페이지 1회 방문)
 # ---------------------------------------------------------------------------
@@ -208,8 +328,6 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     import pathlib, datetime
 
     logger.info(f"[{model_name}] Kream 검색 시작")
-
-    products: list[KreamProduct] = []
 
     # 헤더가 보이도록 맨 위로 스크롤 (검색결과 페이지에서 헤더가 숨겨질 수 있음)
     t0 = time.monotonic()
@@ -311,46 +429,12 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     total_found = len(cards_data)
     logger.info(f"[{model_name}] 검색 결과 {total_found}개 발견")
 
-    if total_found >= 3:
-        logger.info(f"[{model_name}] 결과 {total_found}개 — 정확한 매칭 없음, 건너뜀")
-        return []
-
     if total_found == 0:
         logger.warning(f"[{model_name}] 처리할 카드 없음")
         return []
 
-    for card in cards_data:
-        try:
-            if not card["name"] or not card["priceStr"]:
-                logger.debug(f"[{model_name}] 상품명/가격 없음 — 건너뜀")
-                continue
-
-            kream_price = parse_kream_price(card["priceStr"])
-            trade_count = parse_trade_count(card["tradeStr"]) if card["tradeStr"] else 0
-
-            product = KreamProduct(
-                model_name=model_name,
-                kream_name=card["name"],
-                kream_price=kream_price,
-                trade_count=trade_count,
-                kream_url=card["href"],
-            )
-            products.append(product)
-            logger.info(
-                f"[{model_name}] 수집: {card['name']!r}, "
-                f"가격={kream_price:,}원, 거래량={trade_count}"
-            )
-
-        except Exception as exc:
-            logger.warning(f"[{model_name}] 카드 파싱 실패: {exc} — 건너뜀")
-
-    # 첫 번째 상품(검색 결과 맨 왼쪽)만 반환
-    if products:
-        first = products[0]
-        products = [first]
-        logger.info(f"[{model_name}] 첫 번째 상품 선택: {first.kream_name!r}, 가격={first.kream_price:,}원, 거래량={first.trade_count:,}")
-
-    return products
+    product = await _find_verified_kream_product(model_name, cards_data, page)
+    return [product] if product is not None else []
 
 
 # ---------------------------------------------------------------------------

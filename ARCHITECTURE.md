@@ -42,8 +42,9 @@ main.py --mode full (기본)
   │     │           diff 생성 후 모든 *_diff.json 의 added/modified 에서 model_name 추출
   │     ├── 200개 초과 시 200개씩 청크 분할 (청크 간 30분 대기)
   │     └── 각 청크마다:
-  │           1. kream/crawler.py 로 Kream 검색 (페이지 풀 KREAM_MAX_CONCURRENCY개)
-  │           2. kream/comparator.py 로 차익 비교 (누적)
+  │           1. kream/crawler.py 로 Kream 검색 후 상세 모델번호 완전 일치 검증
+  │              (페이지 풀 KREAM_MAX_CONCURRENCY개, 검색별 상위 5개 후보)
+  │           2. kream/comparator.py 로 모델번호 재검증 + 차익 비교 (누적)
   │           3. output/YYYYMMDD/arbitrage_results.json 즉시 저장
   │
   └── STEP 4: diff_output.py (전체 크롤 날짜에만 실행)
@@ -95,7 +96,7 @@ resell-sniper/
 ├── kream/                # Kream 크롤러 + 가격 비교
 │   ├── __init__.py
 │   ├── crawler.py        # init_kream_page(), search_kream()
-│   ├── parser.py         # KREAM_SELECTORS, parse_kream_price(), parse_trade_count()
+│   ├── parser.py         # Kream 셀렉터, 가격·거래량·상세 모델번호 파싱/비교
 │   └── comparator.py     # find_arbitrage()
 │
 ├── output/               # 크롤링 결과 저장소
@@ -117,7 +118,8 @@ resell-sniper/
 ├── logs/                 # 로그 파일
 ├── plans/                # 작업 계획 산출물
 ├── tests/
-│   └── test_model_names.py # 모델명 규칙·크롤러 변환 회귀 테스트
+│   ├── test_kream_model_match.py # Kream 상세 모델번호 검증·비교 회귀 테스트
+│   └── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 ├── requirements.txt
 └── venv/
 ```
@@ -217,22 +219,32 @@ resell-sniper/
 | 클래스 | 설명 |
 |---|---|
 | `MarketplaceProduct` | 공통 상품 포맷 (site_name, product_name, model_name, price, url, crawled_at, sale_price) — 네이버·아디다스·무신사 등 모든 소스 공유. sale_price는 SITE_DISCOUNT_RATES 할인 적용가, 미적용 시 None |
-| `KreamProduct` | Kream 상품 (model_name, kream_name, kream_price, trade_count, kream_url) |
+| `KreamProduct` | 상세 페이지 모델번호 검증을 통과한 Kream 상품 (실제 model_name, kream_name, kream_price, trade_count, kream_url) |
 | `ArbitrageResult` | 차익 거래 결과 (양쪽 가격, 가격차, 거래량, URL, 체크 시각) |
 | `ItemDiff` / `FieldChange` | diff_output.py 전용 변경 추적 모델 |
 
 ### kream/crawler.py
 - `init_kream_page(context)` — stealth 페이지 생성 후 메인 페이지 1회 방문
-- `search_kream(model_name, page, context)` — 차단 시 지수 백오프 재시도 + 새 stealth 페이지 생성
+- `search_kream(model_name, page)` — 차단 시 지수 백오프 재시도. 새 페이지를 만들지 않고 같은 페이지를 Kream 홈으로 재이동
 - `_open_search_and_get_input(page)` — 입력창이 이미 보이면 바로 반환(검색 결과 페이지), 없으면 헤더 검색 버튼 클릭 후 반환
 - `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → Enter → 결과 파싱
-- 검색 결과: 3개 이상이면 정확한 매칭 없음으로 판단하여 빈 리스트 반환. 1~2개이면 첫 번째 상품 선택
+- `_load_detail_model_number(page, product_url)` — Playwright 세션으로 후보 상세 URL을 열고 서버 응답 HTML의 `모델번호` 문단을 우선 파싱한 뒤, 없으면 반응형 중복 요소 중 첫 hidden 노드에 막히지 않도록 `attached` DOM 전체 텍스트로 폴백한다. 두 경로 모두 실패하면 `None`을 반환해 fail-closed 처리
+- `_find_verified_kream_product(model_name, cards_data, page)` — 검색 결과 상위 `MAX_RESULTS=5`개 상세를 순서대로 확인하고 실제 모델번호가 검색어와 완전 일치하는 첫 상품만 반환
+- 검색 결과 수로 정확도를 추정하지 않는다. 상세 모델번호 검증을 통과하지 못한 후보는 KreamProduct와 차익 결과에 저장하지 않는다.
 - 검색 간 딜레이: 8~15초 / 최대 재시도: 3회, 백오프: 30→60→120초
+
+### kream/parser.py
+- `KREAM_SELECTORS` — 검색 카드와 상세 `모델번호` 문단 셀렉터
+- `parse_kream_model_number(text)` — `모델번호 {값}` 문단에서 실제 모델번호 추출
+- `parse_kream_model_number_html(detail_html)` — Playwright가 받은 서버 렌더링 상세 HTML의 문단에서 실제 모델번호 추출
+- `normalize_model_number(model_number)` — NFKC·대소문자·공백/구분자 표기를 비교용으로 정규화
+- `model_numbers_match(expected, actual)` — 정규화된 두 모델번호의 전체 문자열 일치 여부 판정. 부분 문자열은 허용하지 않는다.
+- `parse_kream_price()` / `parse_trade_count()` — 검색 카드 가격·거래량 문자열 파싱
 
 ### kream/comparator.py
 - `_effective_price(p)` — MarketplaceProduct의 sale_price가 있으면 그것을, 없으면 price를 반환
 - `_is_opportunity(marketplace_price, kream_price, trade_count)` — 거래량·가격차 필터 판정
-- `find_arbitrage(marketplace_products, kream_products_map)` — 비교 기준: `_effective_price(marketplace)`. ArbitrageResult.marketplace_price = effective price, price_diff = kream_price - effective_price
+- `find_arbitrage(marketplace_products, kream_products_map)` — 가격·거래량 필터 전에 마켓 상품 모델번호와 Kream 상세 모델번호를 다시 완전 일치 비교한다. 가격 기준은 `_effective_price(marketplace)`이며 `ArbitrageResult.marketplace_price = effective price`, `price_diff = kream_price - effective_price`
 
 ### diff_output.py
 - `KEY_CONFIG` — 파일별 복합 비교 키 (명시 등록 파일)
@@ -271,4 +283,4 @@ resell-sniper/
 5. 쿠키 영속성 — 세션 쿠키를 `output/session/kream_cookies.json`에 저장·재사용
 6. 검색 방식: 검색창 클릭 + 키보드 타이핑 + Enter
 7. 사람처럼 행동: 랜덤 딜레이, 마우스 이동, 스크롤
-8. 차단 감지 시 새 stealth 페이지 생성 + 지수 백오프 재시도 (30→60→120초)
+8. 차단 감지 시 같은 페이지를 Kream 홈으로 재이동 + 지수 백오프 재시도 (30→60→120초)

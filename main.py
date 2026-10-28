@@ -46,8 +46,12 @@ logger = get_logger("main")
 # 직렬화 / 로드 헬퍼
 # ---------------------------------------------------------------------------
 
+def _sale_url(name: str) -> str:
+    return (getattr(config, name, "") or "").strip()
+
+
 def _save_json(data: list, path: Path) -> None:
-    """데이터클래스 리스트를 JSON 파일로 저장한다."""
+    """데이터클래스 리스트를 JSON 파일로 저장한다. 숫자 필드는 정수로 남긴다."""
     path.write_text(
         json.dumps([asdict(item) for item in data], ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -156,9 +160,11 @@ async def main(mode: str) -> None:
                 logger.error(f"marketplace_products.json 저장 실패: {exc}")
                 raise
 
-        # 아디다스 크롤링
+        # 아디다스 공홈. URL이 없으면 크롤러를 호출하지 않는다.
         adidas_output = output_dir / "adidas_products.json"
-        if adidas_output.exists():
+        if not _sale_url("ADIDAS_SALE_URL"):
+            logger.info("ADIDAS_SALE_URL 미설정 — 아디다스 크롤링 생략")
+        elif adidas_output.exists():
             logger.info(f"오늘자 파일 존재 — 아디다스 크롤링 스킵: {adidas_output}")
         else:
             logger.info("아디다스 Extra Sale 크롤링 시작")
@@ -173,9 +179,11 @@ async def main(mode: str) -> None:
             except Exception as exc:
                 logger.warning(f"아디다스 크롤링 실패 (파이프라인은 계속): {exc}")
 
-        # 나이키 크롤링
+        # 나이키 공홈. URL이 없으면 크롤러를 호출하지 않는다.
         nike_output = output_dir / "nike_products.json"
-        if nike_output.exists():
+        if not _sale_url("NIKE_SALE_URL"):
+            logger.info("NIKE_SALE_URL 미설정 — 나이키 크롤링 생략")
+        elif nike_output.exists():
             logger.info(f"오늘자 파일 존재 — 나이키 크롤링 스킵: {nike_output}")
         else:
             logger.info("나이키 세일 신발 크롤링 시작")
@@ -331,15 +339,7 @@ async def main(mode: str) -> None:
 
         # 청크마다 파일 저장 (누적 결과)
         try:
-            arb_dicts = []
-            for item in arbitrage_results:
-                d = asdict(item)
-                d["price_diff"] = f"{d['price_diff']:,}"
-                arb_dicts.append(d)
-            arb_output.write_text(
-                json.dumps(arb_dicts, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            _save_json(arbitrage_results, arb_output)
             logger.info(
                 f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
             )

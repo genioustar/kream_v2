@@ -135,16 +135,13 @@ async def create_browser(headless: bool = False):
         locale="ko-KR",
         timezone_id="Asia/Seoul",       # A) 시간대 추가
         user_agent=ua,
+        # Sec-Fetch-* 를 모든 요청에 덮으면 Chromium이 이미지·스크립트를
+        # net::ERR_INVALID_ARGUMENT 로 거절하고, Kream 검색 레이어가 열리지 않는다.
         extra_http_headers={
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
             "Upgrade-Insecure-Requests": "1",
-            **client_hints,             # B) sec-ch-ua 헤더 추가
+            **client_hints,
         },
     )
 

@@ -27,3 +27,7 @@ logs/
 # IDE
 .vscode/
 .idea/
+.cursor/
+
+# Graphify 생성물 (로컬에서 다시 만들 수 있음)
+graphify-out/

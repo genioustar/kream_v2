@@ -53,7 +53,7 @@ main.py --mode full (기본)
 ```
 resell-sniper/
 ├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream)
-├── chrome.py             # Chrome CDP 디버깅 모드 실행 스크립트 (Windows/macOS 공용)
+├── chrome.py             # Chrome CDP 실행. resolve_cdp_url()이 크롤러의 DevTools 주소를 정한다
 ├── config.py             # 사이트 URL, 필터 상수, 동시성 설정
 ├── diff_output.py        # 날짜별 JSON 변경분 비교 도구
 │
@@ -115,17 +115,22 @@ resell-sniper/
 - `KREAM_CHUNK_SIZE = 200` — 청크 분할 기준 (모델 수가 이를 초과하면 분할)
 - `KREAM_CHUNK_INTERVAL_SEC = 1800` — 청크 간 대기 시간 (30분)
 - STEP 2~3 모델명 소스: 전체 크롤 날짜(1·10·20·30일)는 `*_products.json` 전체, 그 외 날짜는 `*_diff.json` 전체
-- 청크 처리: 모델 수 > 200이면 200개씩 분할, 각 청크 완료 후 `arbitrage_results.json` 저장, 다음 청크 전 30분 대기
+- 청크 처리: 모델 수 > 200이면 200개씩 분할, 각 청크 완료 후 `arbitrage_results.json` 저장, 다음 청크 전 30분 대기. `price_diff`는 정수로 저장하고 천 단위 표시는 로그에서만 한다.
+- `NIKE_SALE_URL`·`ADIDAS_SALE_URL`이 없으면 해당 크롤러를 호출하지 않는다.
 
 ### common/browser.py
 - `USER_AGENTS` — 12종의 Chrome UA 풀 (Mac/Windows/Linux, Chrome 130~136 최신 버전)
 - `_get_client_hints(ua)` — UA에서 Chrome 버전·플랫폼을 추출해 `sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform` 헤더 생성
 - `_load_cookies(context)` / `_save_cookies(context)` — `output/session/kream_cookies.json`에 쿠키 영속화
-- `create_browser(headless)` — UA 1회 선택 후 컨텍스트 전체에 적용, `timezone_id="Asia/Seoul"` 설정, sec-ch-ua 헤더 자동 주입, 시작 시 쿠키 로드·종료 시 저장
+- `create_browser(headless)` — UA 1회 선택 후 컨텍스트 전체에 적용, `timezone_id="Asia/Seoul"` 설정, sec-ch-ua 헤더만 주입. `Sec-Fetch-*`와 `Accept-Encoding`은 Chromium 기본값에 맡긴다. 시작 시 쿠키 로드·종료 시 저장
 - `new_stealth_page(context)` — playwright-stealth 적용 + webdriver 탐지 제거
 
+### chrome.py
+- `resolve_cdp_url()` — 크롤러가 붙을 DevTools 주소. 9222가 DevTools면 그 주소. 아니면 `output/session/cdp_port`에 기록된 포트.
+- `main()` — 9222가 다른 프로세스에 점유돼 있으면 9222–9232 중 빈 포트로 Chrome을 띄운다. DevTools가 뜨면 포트를 기록하고 0으로 끝난다. 실패하면 1.
+
 ### nike/crawler.py
-- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kasada 탐지로 Playwright Chromium은 차단됨. URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp(resolve_cdp_url())`). Kasada 탐지로 Playwright Chromium은 차단됨. URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_collect_via_api(page, target_count=100)` — 스크롤로 Nike JS가 `product_wall` API 호출을 유도하고 `page.on("response", ...)` 로 JSON 응답을 인터셉트해 수집. scrollY 변화 없음 NO_CHANGE_LIMIT(6)회 연속이면 종료
 - `_parse_api_product(item, crawled_at)` — API 응답 항목을 `MarketplaceProduct` 로 변환. 필드: `copy.title`, `copy.subTitle`, `prices.currentPrice`, `pdpUrl.url`, `productCode`
 - `_extract_model_name(card_text, href)` — `_parse_api_product` 내 폴백. 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 3순위
@@ -133,7 +138,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
 
 ### special/crawler.py
-- `crawl_special()` — `config.SPECIAL_SALE_URL` 페이지를 JS 휴리스틱으로 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). 미설정/빈 값이면 즉시 [] 반환. CDP 연결 실패 시 [] 반환 + error 로그.
+- `crawl_special()` — `config.SPECIAL_SALE_URL` 페이지를 JS 휴리스틱으로 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp(resolve_cdp_url())`). 미설정/빈 값이면 즉시 [] 반환. CDP 연결 실패 시 [] 반환 + error 로그.
 - `_JS_EXTRACT` — 3단계 휴리스틱으로 상품 카드 자동 탐지하는 JS 문자열
   - 전략 1: `<li>` 요소 중 img + a[href] + 가격패턴 모두 포함한 것
   - 전략 2: `<a[href]>` 요소 자체에 img + 가격패턴 포함한 것
@@ -143,7 +148,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="special") → `output/YYYYMMDD/special_products.json`
 
 ### adidas/crawler.py
-- `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kids 카테고리 자동 제외. 페이지네이션 처리. URL 출처: `config.ADIDAS_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_adidas()` — Extra Sale 신발 페이지 전체 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp(resolve_cdp_url())`). Kids 카테고리 자동 제외. 페이지네이션 처리. URL 출처: `config.ADIDAS_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_find_card_selector(page)` — CARD_SELECTORS 후보 목록에서 실제 DOM에 존재하는 셀렉터 자동 탐지. 전부 실패 시 URL·제목·본문 앞 500자를 WARNING 로그로 출력
 - `_extract_products(page, card_selector)` — JS evaluate로 카드 일괄 파싱 (상품명·코드·세일가·Kids 여부)
 - 상품명 추출: `href` URL 경로에서 `decodeURIComponent` → `-` 공백 치환 방식 (innerText 파싱 대비 UI 텍스트 오염 없음)
@@ -155,11 +160,12 @@ resell-sniper/
 - `get_selectors(store_type)` — 스토어 타입에 맞는 셀렉터 딕셔너리 반환
 - `parse_price(price_str)` — 가격 문자열에서 숫자 추출
 - `extract_model_names(product_name)` — 상품명에서 모델명 목록 추출
-- `clean_url(raw_url, base)` — 상대 URL → 절대 URL 변환
+- `page_origin(page_url)` — 카드를 연 페이지의 origin
+- `clean_url(raw_url, base)` — 상대 URL을 `base` origin 기준 절대 URL로 변환. `base`는 호출자가 넘긴다.
 
 ### naver/crawler.py
 - `_scroll_to_bottom(page, item_selector)` — 무한스크롤 처리
-- `_extract_product(item, selectors, site_name, crawled_at)` — 단일 상품 카드 파싱
+- `_extract_product(item, selectors, site_name, crawled_at, page_url)` — 단일 상품 카드 파싱. 상품 URL의 기준은 `page_url`의 origin.
 - `_crawl_site(context, site_info)` — 단일 사이트 크롤링
 - `crawl_marketplace()` — config.SEARCH_URLS 대상 병렬 크롤링. SEARCH_URLS 가 비어있거나 유효한 url 항목이 하나도 없으면 [] 반환. 항목별 url 누락 시 해당 사이트만 스킵하고 나머지는 진행.
 
@@ -173,10 +179,9 @@ resell-sniper/
 
 ### kream/crawler.py
 - `init_kream_page(context)` — stealth 페이지 생성 후 메인 페이지 1회 방문
-- `search_kream(model_name, page, context)` — 차단 시 지수 백오프 재시도 + 새 stealth 페이지 생성
-- `_open_search_and_get_input(page)` — 입력창이 이미 보이면 바로 반환(검색 결과 페이지), 없으면 헤더 검색 버튼 클릭 후 반환
-- `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → Enter → 결과 파싱
-- 검색 결과: 3개 이상이면 정확한 매칭 없음으로 판단하여 빈 리스트 반환. 1~2개이면 첫 번째 상품 선택
+- `search_kream(model_name, page)` — 차단 시 지수 백오프 재시도 후 홈으로 재이동
+- `_search_kream_once(model_name, page)` — `https://kream.co.kr/search?keyword=` 문서로 이동한 뒤 결과 카드를 파싱. 헤더 검색창의 SPA 이동은 카드 DOM을 만들지 않는다.
+- `_card_matches_model(name, model_name)` — 카드 이름에 검색한 모델코드가 있을 때만 채택. 같은 href는 한 번만 남긴다.
 - 검색 간 딜레이: 8~15초 / 최대 재시도: 3회, 백오프: 30→60→120초
 
 ### kream/comparator.py
@@ -193,14 +198,14 @@ resell-sniper/
 ### config.py
 | 상수 | 기본값 | 설명 |
 |---|---|---|
-| `SEARCH_URLS` | 4개 사이트 | 네이버 크롤링 대상 |
+| `SEARCH_URLS` | 8개 사이트 | 네이버 카드 셀렉터로 여는 스토어. 쇼핑스토리 5002700579는 여기 없다 |
 | `MIN_TRADE_COUNT` | 100 | Kream 거래량 최솟값 |
-| `MIN_PRICE_DIFF` | 10,000 | 차익 최솟값 (원) |
+| `MIN_PRICE_DIFF` | 7,000 | 차익 최솟값 (원) |
 | `KREAM_MAX_CONCURRENCY` | 2 | 동시 Kream 검색 페이지 수 |
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
-| `NIKE_SALE_URL` | nike.com/kr/w/clearance-shoes | 나이키 성인 세일 신발 URL (빈 값/미설정 시 나이키 크롤링 스킵) |
-| `ADIDAS_SALE_URL` | adidas.co.kr/extra_sale-shoes | 아디다스 Extra Sale 신발 URL (빈 값/미설정 시 아디다스 크롤링 스킵) |
-| `SPECIAL_SALE_URL` | "" (사용자의 입력값) | 범용 적응형 크롤러 대상 URL (빈 값/미설정 시 special 크롤링 스킵) |
+| `NIKE_SALE_URL` | 미설정 (주석) | 나이키 성인 세일 신발 URL. 없으면 `main`이 크롤러를 호출하지 않는다 |
+| `ADIDAS_SALE_URL` | 미설정 (주석) | 아디다스 Extra Sale 신발 URL. 없으면 `main`이 크롤러를 호출하지 않는다 |
+| `SPECIAL_SALE_URL` | 쇼핑스토리 5002700579 | 범용 적응형 크롤러 대상. 네이버 카드 셀렉터로 열리지 않는 페이지의 단일 소유 |
 | `SITE_DISCOUNT_RATES` | 전 사이트 0% | 소스 크롤러별 수동 할인율 (%). 키: marketplace·adidas·nike·special. 0이면 sale_price 미산출 |
 
 ## 새 크롤링 소스 추가 방법

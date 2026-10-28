@@ -10,7 +10,7 @@ import config
 from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
-from naver.parser import get_selectors, parse_price, extract_model_names, clean_url
+from naver.parser import get_selectors, parse_price, extract_model_names, clean_url, page_origin
 
 logger = get_logger("naver.crawler")
 
@@ -60,6 +60,7 @@ async def _extract_product(
     selectors: dict[str, str],
     site_name: str,
     crawled_at: str,
+    page_url: str,
 ) -> list[MarketplaceProduct]:
     """
     단일 상품 카드 Locator에서 MarketplaceProduct 목록을 추출합니다.
@@ -93,7 +94,7 @@ async def _extract_product(
         # URL
         url_el = item.locator(selectors["url"]).first
         raw_url = await url_el.get_attribute("href")
-        product_url = clean_url(raw_url)
+        product_url = clean_url(raw_url, page_origin(page_url))
 
         # 모델명 목록 추출 (복수 가능)
         model_names = extract_model_names(product_name)
@@ -166,7 +167,7 @@ async def _crawl_site(context, site_info: dict) -> list[MarketplaceProduct]:
 
         for i in range(total_count):
             item = items.nth(i)
-            extracted = await _extract_product(item, selectors, site_name, crawled_at)
+            extracted = await _extract_product(item, selectors, site_name, crawled_at, page.url)
             if extracted:
                 products.extend(extracted)
             else:

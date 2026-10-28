@@ -6,7 +6,7 @@ Kasada 봇 탐지 우회를 위해 실제 Chrome에 CDP로 연결한다.
 Playwright 자체 Chromium은 Kasada fingerprint 탐지에 걸려 무한스크롤 JS가 비활성화된다.
 
 사전 준비:
-  make chrome 으로 Chrome CDP를 먼저 실행해야 한다.
+  python chrome.py 로 Chrome CDP를 먼저 실행해야 한다.
 
 상품 수집 방식:
   스크롤로 Nike JS가 product_wall API를 호출하게 유도 → 응답 인터셉트 → JSON 파싱
@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Page, async_playwright
 
 import config
+from chrome import resolve_cdp_url
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 
@@ -32,7 +33,6 @@ logger = get_logger("nike.crawler")
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-CDP_URL                 = "http://127.0.0.1:9222"  # make chrome으로 먼저 실행
 SITE_NAME               = "nike"
 PAGE_LOAD_TIMEOUT_MS    = 60_000
 PAGE_SETTLE_SEC         = 3.0
@@ -256,12 +256,13 @@ async def crawl_nike() -> list[MarketplaceProduct]:
     pw = await async_playwright().start()
     try:
         try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
-            logger.info(f"실제 Chrome CDP 연결 성공 ({CDP_URL})")
+            cdp_url = resolve_cdp_url()
+            browser = await pw.chromium.connect_over_cdp(cdp_url)
+            logger.info(f"실제 Chrome CDP 연결 성공 ({cdp_url})")
         except Exception as exc:
             logger.error(
                 f"Chrome CDP 연결 실패: {exc}\n"
-                f"먼저 'make chrome'을 실행해 Chrome CDP를 시작하세요."
+                f"먼저 'python chrome.py'를 실행해 Chrome CDP를 시작하세요."
             )
             return []
 

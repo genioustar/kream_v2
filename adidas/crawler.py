@@ -7,8 +7,7 @@ Playwright가 직접 띄운 브라우저는 Akamai fingerprint 탐지에 걸리�
 실제 크롬은 쿠키·fingerprint가 정상이므로 차단되지 않는다.
 
 사전 준비:
-  크롬을 --remote-debugging-port=9222 옵션으로 실행해야 한다.
-  macOS: open -a "Google Chrome" --args --remote-debugging-port=9222
+  python chrome.py 로 Chrome CDP를 먼저 실행해야 한다.
 """
 import asyncio
 import json
@@ -21,6 +20,7 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 import config
+from chrome import resolve_cdp_url
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 
@@ -32,7 +32,6 @@ logger = get_logger("adidas.crawler")
 SITE_NAME             = "adidas"
 PAGE_LOAD_TIMEOUT     = 60_000
 SELECTOR_TIMEOUT      = 15_000
-CDP_URL               = "http://127.0.0.1:9222"
 
 # 상품 카드 셀렉터 후보 (앞에서부터 시도)
 # article[class*="product"] 를 우선 — product-card 는 너무 광범위하게 매칭됨
@@ -178,7 +177,7 @@ async def crawl_adidas() -> list[MarketplaceProduct]:
     실제 크롬(CDP)에 연결하여 아디다스 Extra Sale 신발 페이지를 크롤링한다.
 
     Akamai Bot Manager 우회를 위해 CDP 연결 방식을 사용한다.
-    실행 전 크롬을 --remote-debugging-port=9222 로 먼저 실행해야 한다.
+    실행 전 python chrome.py 로 Chrome CDP를 먼저 실행해야 한다.
 
     Returns:
         MarketplaceProduct 포맷으로 수집된 아디다스 상품 목록.
@@ -199,14 +198,13 @@ async def crawl_adidas() -> list[MarketplaceProduct]:
     try:
         # 실제 크롬에 CDP 연결
         try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
-            logger.info(f"실제 크롬 CDP 연결 성공 ({CDP_URL})")
+            cdp_url = resolve_cdp_url()
+            browser = await pw.chromium.connect_over_cdp(cdp_url)
+            logger.info(f"실제 크롬 CDP 연결 성공 ({cdp_url})")
         except Exception as exc:
             logger.error(
                 f"크롬 CDP 연결 실패: {exc}\n"
-                f"크롬을 디버깅 포트로 실행해주세요:\n"
-                f"  macOS: open -a \"Google Chrome\" --args --remote-debugging-port=9222\n"
-                f"  이미 크롬이 열려있으면 완전히 종료 후 위 명령 실행"
+                f"먼저 'python chrome.py'를 실행해 Chrome CDP를 시작하세요."
             )
             return []
 

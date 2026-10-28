@@ -1,5 +1,21 @@
 # 변경 히스토리
 
+## 2026-10-24 — 매칭·주소·차익 타입
+
+- Kream은 카드 장수로 버리지 않는다. 이름에 모델코드가 있는 카드만 남기고 같은 href는 한 번만 둔다. `MAX_RESULTS`는 호출처가 없어 삭제했다.
+- `clean_url`의 기준은 그 카드를 연 페이지 origin이다. `https://www.naver.com` 기본값은 제거했다.
+- `arbitrage_results.json`의 `price_diff`는 정수다. 천 단위 문자열로 덮지 않는다.
+- 쇼핑스토리 `5002700579`는 `SPECIAL_SALE_URL`만 소유한다. 같은 주소를 `SEARCH_URLS`의 adidas 항목으로 열면 상품 카드 셀렉터가 타임아웃했다.
+- `NIKE_SALE_URL`·`ADIDAS_SALE_URL`이 없으면 `main`은 해당 크롤러를 호출하지 않는다.
+
+## 2026-10-24 — 실행 환경과 Chrome CDP 주소를 고침
+
+- `.venv`를 설치된 Python 3.14로 다시 만들고 `requirements.txt`와 Playwright Chromium을 설치했다. 이전 가상환경은 없는 `C:\Python312\python.exe`를 가리켰다.
+- `chrome.resolve_cdp_url()`이 DevTools 주소를 정한다. 9222가 DevTools가 아니면 `chrome.py`가 9222–9232 중 빈 포트로 Chrome을 띄우고 `output/session/cdp_port`에 기록한다. 준비 실패 시 종료 코드 1.
+- nike, adidas, special 크롤러는 이 주소로 `connect_over_cdp` 한다.
+- `create_browser()`가 `Sec-Fetch-*`를 모든 요청에 덮어 Kream 이미지·스크립트가 `net::ERR_INVALID_ARGUMENT`로 실패하고 검색창이 열리지 않았다. `Sec-Fetch-*`와 브라우저가 직접 넣는 `Accept-Encoding`을 제거했다.
+- Kream 검색은 헤더 입력 대신 `https://kream.co.kr/search?keyword=` 문서로 이동한다. 같은 주소로 SPA 이동하면 상품 카드가 DOM에 없다.
+
 ## 2026-05-08 — 비교 맥락 식별자 naver → marketplace 일괄 변경
 
 - `common/models.py`: `NaverProduct` → `MarketplaceProduct` (클래스명), `ArbitrageResult` 필드 `naver_site/price/url` → `marketplace_site/price/url`

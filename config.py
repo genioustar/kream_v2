@@ -7,20 +7,20 @@ SEARCH_URLS = [
     {"site_name": "artemoa", "url": "https://smartstore.naver.com/artemoa/category/4189ca0f9ee448be913cd0123f7fd0e3?cp=1", "type": "smart_store"},
     {"site_name": "burningwear", "url": "https://smartstore.naver.com/burningwear/best?cp=1", "type": "smart_store"},
     {"site_name": "reasonershop", "url": "https://smartstore.naver.com/reasonershop/category/9e4d920d708943489393d2ca83467562?cp=1", "type": "smart_store"},
-    {"site_name": "adidas", "url": "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579&page=1#2-shopping-story-detail", "type": "smart_store"}
 ]
 MIN_TRADE_COUNT = 100
-MIN_PRICE_DIFF = 1000
+MIN_PRICE_DIFF = 7000
 KREAM_MAX_CONCURRENCY = 2
 OUTPUT_DIR = "output"
 #NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
-ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
+#ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
+# 쇼핑스토리 5002700579. 네이버 상품 카드 셀렉터로는 열리지 않는다.
 SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"
 
 # 사이트별 수동 할인율 (%) — Kream 외 크롤러에 적용. 0이면 sale_price 미산출.
 SITE_DISCOUNT_RATES = {
     "marketplace": 0,
-    "adidas": 30,
+    "adidas": 0,
     "nike": 0,
     "special": 0,
 }

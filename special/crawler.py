@@ -20,6 +20,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 import config
+from chrome import resolve_cdp_url
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 from naver.parser import extract_model_names
@@ -29,7 +30,6 @@ logger = get_logger("special.crawler")
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-CDP_URL               = "http://127.0.0.1:9222"
 SITE_NAME             = "special"
 PAGE_LOAD_TIMEOUT_MS  = 60_000
 PAGE_SETTLE_SEC       = 3.0
@@ -202,8 +202,9 @@ async def crawl_special() -> list[MarketplaceProduct]:
     pw = await async_playwright().start()
     try:
         try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
-            logger.info(f"실제 Chrome CDP 연결 성공 ({CDP_URL})")
+            cdp_url = resolve_cdp_url()
+            browser = await pw.chromium.connect_over_cdp(cdp_url)
+            logger.info(f"실제 Chrome CDP 연결 성공 ({cdp_url})")
         except Exception as exc:
             logger.error(
                 f"Chrome CDP 연결 실패: {exc}\n"

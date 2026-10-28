@@ -1,5 +1,6 @@
 import re
 from typing import Optional
+from urllib.parse import urlsplit
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +226,16 @@ def extract_model_names(product_name: str) -> list[str]:
 # 편의 함수
 # ---------------------------------------------------------------------------
 
-def clean_url(raw_url: Optional[str], base: str = "https://www.naver.com") -> Optional[str]:
-    """상대 URL을 절대 URL로 변환합니다."""
+def page_origin(page_url: str) -> str:
+    """카드 href의 기준은 그 카드를 연 페이지의 origin이다."""
+    parts = urlsplit(page_url)
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return page_url
+
+
+def clean_url(raw_url: Optional[str], base: str) -> Optional[str]:
+    """상대 URL을 페이지 origin 기준 절대 URL로 변환합니다."""
     if not raw_url:
         return None
     if raw_url.startswith("http"):

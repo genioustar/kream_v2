@@ -5,18 +5,13 @@
   },
   "permissions": {
     "allow": [
-      "Bash(tmux ls:*)",
-      "Bash(tmux list-sessions:*)",
-      "Bash(tmux list-windows:*)",
-      "Bash(tmux list-panes:*)",
-      "Bash(tmux kill-pane:*)",
-      "Bash(python3 -m venv venv)",
-      "Bash(kill 40161:*)"
+      "Bash",
+      "WebSearch"
     ]
   },
   "model": "opusplan",
-  "teammateMode": "tmux",
-  "dangerouslySkipPermissions": true,
   "outputStyle": "Explanatory",
-  "plansDirectory": "./plans"
+  "plansDirectory": "./plans",
+  "teammateMode": "tmux",
+  "dangerouslySkipPermissions": true
 }

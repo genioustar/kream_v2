@@ -28,6 +28,7 @@ from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
 from kream.comparator import find_arbitrage
 from kream.crawler import DELAY_MAX_SEC, DELAY_MIN_SEC, init_kream_page, search_kream, _human_wait
+from musinsa.crawler import crawl_musinsa
 from naver.crawler import crawl_marketplace
 from nike.crawler import crawl_nike
 from special.crawler import crawl_special
@@ -46,12 +47,8 @@ logger = get_logger("main")
 # 직렬화 / 로드 헬퍼
 # ---------------------------------------------------------------------------
 
-def _sale_url(name: str) -> str:
-    return (getattr(config, name, "") or "").strip()
-
-
 def _save_json(data: list, path: Path) -> None:
-    """데이터클래스 리스트를 JSON 파일로 저장한다. 숫자 필드는 정수로 남긴다."""
+    """데이터클래스 리스트를 JSON 파일로 저장한다."""
     path.write_text(
         json.dumps([asdict(item) for item in data], ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -160,11 +157,9 @@ async def main(mode: str) -> None:
                 logger.error(f"marketplace_products.json 저장 실패: {exc}")
                 raise
 
-        # 아디다스 공홈. URL이 없으면 크롤러를 호출하지 않는다.
+        # 아디다스 크롤링
         adidas_output = output_dir / "adidas_products.json"
-        if not _sale_url("ADIDAS_SALE_URL"):
-            logger.info("ADIDAS_SALE_URL 미설정 — 아디다스 크롤링 생략")
-        elif adidas_output.exists():
+        if adidas_output.exists():
             logger.info(f"오늘자 파일 존재 — 아디다스 크롤링 스킵: {adidas_output}")
         else:
             logger.info("아디다스 Extra Sale 크롤링 시작")
@@ -179,11 +174,26 @@ async def main(mode: str) -> None:
             except Exception as exc:
                 logger.warning(f"아디다스 크롤링 실패 (파이프라인은 계속): {exc}")
 
-        # 나이키 공홈. URL이 없으면 크롤러를 호출하지 않는다.
+        # 무신사 크롤링
+        musinsa_output = output_dir / "musinsa_products.json"
+        if musinsa_output.exists():
+            logger.info(f"오늘자 파일 존재 — 무신사 크롤링 스킵: {musinsa_output}")
+        else:
+            logger.info("무신사 상품 크롤링 시작")
+            try:
+                musinsa_products = await crawl_musinsa()
+                if musinsa_products:
+                    _apply_sale_price(musinsa_products, "musinsa")
+                    _save_json(musinsa_products, musinsa_output)
+                    logger.info(f"무신사 상품 {len(musinsa_products)}개 저장 → {musinsa_output}")
+                else:
+                    logger.warning("무신사 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
+            except Exception as exc:
+                logger.warning(f"무신사 크롤링 실패 (파이프라인은 계속): {exc}")
+
+        # 나이키 크롤링
         nike_output = output_dir / "nike_products.json"
-        if not _sale_url("NIKE_SALE_URL"):
-            logger.info("NIKE_SALE_URL 미설정 — 나이키 크롤링 생략")
-        elif nike_output.exists():
+        if nike_output.exists():
             logger.info(f"오늘자 파일 존재 — 나이키 크롤링 스킵: {nike_output}")
         else:
             logger.info("나이키 세일 신발 크롤링 시작")
@@ -339,7 +349,15 @@ async def main(mode: str) -> None:
 
         # 청크마다 파일 저장 (누적 결과)
         try:
-            _save_json(arbitrage_results, arb_output)
+            arb_dicts = []
+            for item in arbitrage_results:
+                d = asdict(item)
+                d["price_diff"] = f"{d['price_diff']:,}"
+                arb_dicts.append(d)
+            arb_output.write_text(
+                json.dumps(arb_dicts, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
             logger.info(
                 f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
             )

@@ -9,10 +9,11 @@ special/crawler.py
 상품 수집 방식:
   1. CDP로 실제 Chrome에 연결
   2. 페이지 로드 후 스크롤하며 JS 휴리스틱 3단계 전략으로 상품 카드 자동 탐지
-  3. seen_urls set 으로 중복 제거하며 MarketplaceProduct 변환
+  3. (URL, model_name) 키로 중복 제거하며 MarketplaceProduct 변환
 """
 import asyncio
 import json
+import re
 from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
@@ -22,8 +23,8 @@ from playwright.async_api import async_playwright
 import config
 from chrome import resolve_cdp_url
 from common.logger import get_logger
+from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
-from naver.parser import extract_model_names
 
 logger = get_logger("special.crawler")
 
@@ -147,13 +148,17 @@ _JS_EXTRACT = """
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-def _to_marketplace_product(card: dict, crawled_at: str) -> MarketplaceProduct | None:
+def _to_marketplace_products(
+    card: dict,
+    crawled_at: str,
+    model_strategy: str,
+) -> list[MarketplaceProduct]:
     """
-    JS 휴리스틱이 추출한 카드 딕셔너리를 MarketplaceProduct로 변환한다.
+    JS 휴리스틱이 추출한 카드 딕셔너리를 MarketplaceProduct 목록으로 변환한다.
 
     model_name 결정:
-    - extract_model_names(name) 의 첫 번째 결과 사용
-    - 없으면 code 사용
+    - config.SPECIAL_MODEL_STRATEGY에 따라 상품명에서 복수 후보 추출
+    - 상품명 후보가 없고 URL code에 영문이 있으면 URL code를 단일 후보로 사용
     """
     url   = card.get("url", "")
     name  = card.get("name", "")
@@ -161,19 +166,23 @@ def _to_marketplace_product(card: dict, crawled_at: str) -> MarketplaceProduct |
     code  = card.get("code", "") or name
 
     if not url or not name or price is None:
-        return None
+        return []
 
-    model_names = extract_model_names(name)
-    model_name  = model_names[0] if model_names else code
+    model_names = extract_model_names(name, strategy=model_strategy)
+    if not model_names and code != name and re.search(r"[A-Za-z]", code):
+        model_names = extract_model_names(code, strategy="suffix_single")
 
-    return MarketplaceProduct(
-        site_name    = SITE_NAME,
-        product_name = name,
-        model_name   = model_name,
-        price        = price,
-        url          = url,
-        crawled_at   = crawled_at,
-    )
+    return [
+        MarketplaceProduct(
+            site_name=SITE_NAME,
+            product_name=name,
+            model_name=model_name,
+            price=price,
+            url=url,
+            crawled_at=crawled_at,
+        )
+        for model_name in model_names
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +207,11 @@ async def crawl_special() -> list[MarketplaceProduct]:
 
     logger.info(f"SPECIAL_SALE_URL 크롤링 시작: {special_url}")
     crawled_at = datetime.now().isoformat(timespec="seconds")
+    model_strategy = getattr(config, "SPECIAL_MODEL_STRATEGY", "auto")
+    if model_strategy not in MODEL_STRATEGIES:
+        raise ValueError(
+            f"지원하지 않는 SPECIAL_MODEL_STRATEGY: {model_strategy!r}"
+        )
 
     pw = await async_playwright().start()
     try:
@@ -228,20 +242,27 @@ async def crawl_special() -> list[MarketplaceProduct]:
             logger.info(f"페이지 로드 완료 — URL: {page.url} | 제목: {await page.title()!r}")
             await asyncio.sleep(PAGE_SETTLE_SEC)
 
-            seen_urls: set[str] = set()
+            seen_keys: set[tuple[str, str]] = set()
             products: list[MarketplaceProduct] = []
 
             def _merge_cards(cards: list[dict]) -> None:
                 for card in cards:
                     url = card.get("url", "")
-                    if not url or url in seen_urls:
+                    if not url:
                         continue
-                    p = _to_marketplace_product(card, crawled_at)
-                    if p:
-                        seen_urls.add(url)
-                        products.append(p)
+                    for product in _to_marketplace_products(
+                        card,
+                        crawled_at,
+                        model_strategy,
+                    ):
+                        key = (url, product.model_name)
+                        if key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+                        products.append(product)
                         logger.info(
-                            f"수집: {p.product_name!r} | {p.model_name} | {p.price:,}원"
+                            f"수집: {product.product_name!r} | "
+                            f"{product.model_name} | {product.price:,}원"
                         )
 
             # 초기 수집 (스크롤 전)

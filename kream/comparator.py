@@ -14,6 +14,7 @@ from datetime import datetime
 from config import MIN_PRICE_DIFF, MIN_TRADE_COUNT
 from common.logger import get_logger
 from common.models import ArbitrageResult, KreamProduct, MarketplaceProduct
+from kream.parser import model_numbers_match
 
 logger = get_logger("kream.comparator")
 
@@ -82,6 +83,13 @@ def find_arbitrage(
 
         for kream in kream_list:
             total_pairs += 1
+            if not model_numbers_match(marketplace.model_name, kream.model_name):
+                logger.warning(
+                    f"[{marketplace.model_name}] Kream 모델번호 불일치 — "
+                    f"actual={kream.model_name!r}, url={kream.kream_url} 건너뜀"
+                )
+                continue
+
             effective = _effective_price(marketplace)
             price_diff = kream.kream_price - effective
 

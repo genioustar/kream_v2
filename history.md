@@ -1,20 +1,35 @@
 # 변경 히스토리
 
-## 2026-10-24 — 매칭·주소·차익 타입
+## 2026-08-05 — Kream 검색 결과 상세 모델번호 검증
 
-- Kream은 카드 장수로 버리지 않는다. 이름에 모델코드가 있는 카드만 남기고 같은 href는 한 번만 둔다. `MAX_RESULTS`는 호출처가 없어 삭제했다.
-- `clean_url`의 기준은 그 카드를 연 페이지 origin이다. `https://www.naver.com` 기본값은 제거했다.
-- `arbitrage_results.json`의 `price_diff`는 정수다. 천 단위 문자열로 덮지 않는다.
-- 쇼핑스토리 `5002700579`는 `SPECIAL_SALE_URL`만 소유한다. 같은 주소를 `SEARCH_URLS`의 adidas 항목으로 열면 상품 카드 셀렉터가 타임아웃했다.
-- `NIKE_SALE_URL`·`ADIDAS_SALE_URL`이 없으면 `main`은 해당 크롤러를 호출하지 않는다.
+- [Kream 모델 일치] 검색 카드의 모델을 검색어로 간주하지 않고 각 후보 상세 페이지의 `모델번호`를 읽어 정규화된 전체 문자열이 일치할 때만 Kream 상품과 차익 결과에 포함한다. 상세 모델번호 누락·파싱 실패·불일치는 fail-closed로 제외하며 comparator에서도 저장 전 다시 검증한다.
+  - SUPERSEDED: 검색 결과가 1~2개면 첫 번째 상품을 정확 매치로 간주하고 3개 이상이면 전부 제외 — Kream 유사 검색이 `IG5749` 검색에 실제 `IG5349` 상품을 첫 번째로 노출할 수 있어, 상위 5개 후보의 상세 모델번호 완전 일치 검증으로 교체했다.
 
-## 2026-10-24 — 실행 환경과 Chrome CDP 주소를 고침
+## 2026-07-29 — 네이버 상품 건너뜀 사유 로그 세분화
 
-- `.venv`를 설치된 Python 3.14로 다시 만들고 `requirements.txt`와 Playwright Chromium을 설치했다. 이전 가상환경은 없는 `C:\Python312\python.exe`를 가리켰다.
-- `chrome.resolve_cdp_url()`이 DevTools 주소를 정한다. 9222가 DevTools가 아니면 `chrome.py`가 9222–9232 중 빈 포트로 Chrome을 띄우고 `output/session/cdp_port`에 기록한다. 준비 실패 시 종료 코드 1.
-- nike, adidas, special 크롤러는 이 주소로 `connect_over_cdp` 한다.
-- `create_browser()`가 `Sec-Fetch-*`를 모든 요청에 덮어 Kream 이미지·스크립트가 `net::ERR_INVALID_ARGUMENT`로 실패하고 검색창이 열리지 않았다. `Sec-Fetch-*`와 브라우저가 직접 넣는 `Accept-Encoding`을 제거했다.
-- Kream 검색은 헤더 입력 대신 `https://kream.co.kr/search?keyword=` 문서로 이동한다. 같은 주소로 SPA 이동하면 상품 카드가 DOM에 없다.
+- [네이버 크롤링 로그] 사이트별 파싱 완료 로그의 `건너뜀`을 `품절`·`모델명 없음`·`파싱 오류`로 나눠 집계한다. 기존 총 건너뜀 수도 유지해 수집 제외와 실제 파싱 실패를 즉시 구분할 수 있게 했다.
+
+## 2026-07-28 — 사이트별 모델명 추출 전략 통합
+
+- [모델명 추출] `common/model_names.py`를 공통 추출기로 추가하고 괄호·슬래시·후행·본문 코드, 숫자-only 코드, 공백 복합 SKU, 복수 대체 모델을 사이트별 전략(`bracket_first`, `slash_first`, `suffix_single`, `suffix_grouped`, `auto`)에 따라 처리한다. 시즌·사이즈·수량·용량 표기는 공통 오탐 필터로 제외한다.
+  - SUPERSEDED: 무신사 모델명을 대문자+숫자 스타일코드의 마지막 값만으로 추출 — 실제 아울렛 상품의 괄호 숫자 코드, 슬래시 코드, 후행 코드, 목록용 보조번호 표기를 누락해 공통 `slash_first` 전략으로 교체했다.
+- [네이버·special 연동] `config.SEARCH_URLS[*].model_strategy`와 `SPECIAL_MODEL_STRATEGY`를 추가하고, 네이버 및 special 크롤러가 추출된 복수 모델을 각각 `MarketplaceProduct`로 저장하도록 통일했다.
+- [네이버 수동 복구] 네이버는 실제 Chrome 채널·전용 `naver_cookies.json`을 사용한다. 상품 목록이 15초 내 나타나지 않으면 브라우저에서 로그인·보안 확인을 마친 뒤 Enter를 누를 때까지 사이트별로 대기하고, `q` 입력 시 해당 사이트만 중단한다.
+- [무신사 URL] `/brand/{slug}` PLP와 현재 설정된 `/main/.../ranking`을 모두 지원하며, 랭킹 API의 `link.next`를 따라 수집한다.
+  - SUPERSEDED: 무신사 크롤러가 브랜드 PLP URL만 지원 — 실제 설정 URL이 아울렛 랭킹으로 바뀌어 URL 형식별 API 분기로 확장했다.
+- [검증] 실제 스토어 표기에서 수집한 괄호·마지막 슬래시·복합 SKU·숫자 대체 코드와 `230~250MM`·`2way` 오탐, 수동 입력 재개 경로를 `tests/test_model_names.py`에 고정했다.
+
+## 2026-06-24 — smart_store 품절 상품 Kream 조회 제외
+
+- `naver/crawler.py`: `smart_store` 상품 카드에서 `품절` 오버레이 또는 `일시품절` 배송 문구를 감지하면 수집하지 않도록 `_is_sold_out_product()` 추가.
+- 품절 상품은 `marketplace_products.json`에 저장되지 않으므로 Kream 검색 대상에서도 자동 제외된다. `brand_store` 타입은 기존 동작을 유지한다.
+
+## 2026-06-20 — 무신사 브랜드 PLP API 크롤러 추가
+
+- `musinsa/crawler.py` 신규: `config.MUSINSA_SALE_URL`에서 brand slug와 query를 추출해 `api2/dp/v2/plp/goods`를 호출하고, `pagination.nextPageUrl`의 `hmacId`를 따라 전체 페이지를 수집한다.
+- 무신사 가격은 DOM 카드에 표시되는 `finalPrice`를 우선 사용하고, 모델명은 대문자+숫자 스타일코드 패턴의 마지막 값을 우선 추출한다. 품절 상품과 모델코드 미추출 상품은 제외한다.
+- `config.py`: 무신사 아디다스 무진장 캠페인 URL과 `SITE_DISCOUNT_RATES["musinsa"] = 0` 추가.
+- `main.py`: STEP 1에 무신사 크롤링 블록 추가 (`musinsa_products.json` 저장). diff/Kream 검색은 기존 `*_products.json` 자동 로드 경로를 재사용한다.
 
 ## 2026-05-08 — 비교 맥락 식별자 naver → marketplace 일괄 변경
 
@@ -24,8 +39,8 @@
 - `config.py`: `SITE_DISCOUNT_RATES["naver"]` → `["marketplace"]`
 - `diff_output.py`: `KEY_CONFIG` 키 `naver_products.json` → `marketplace_products.json`
 - `kream/crawler.py`, `adidas/crawler.py`, `nike/crawler.py`, `special/crawler.py`: `NaverProduct` → `MarketplaceProduct`
-- `special/crawler.py`: `from naver.parser` → `from marketplace.parser`, `_to_naver_product` → `_to_marketplace_product`
-- `marketplace/` 디렉토리(구 `naver/`)는 실제 네이버 크롤러이므로 내부 로직 유지
+- `special/crawler.py`: 공통 상품 타입을 `MarketplaceProduct`로 통일하고, 모델명 추출은 현재 `common.model_names`를 사용한다.
+- `naver/` 디렉터리는 실제 네이버 크롤러이므로 유지하고 공통 데이터 타입·필드명만 `marketplace` 문맥으로 변경했다.
 
 ## 2026-05-07 — sale_price 도입 — 사이트별 수동 할인율 적용 후 Kream 차익 비교에 effective price 사용
 
@@ -106,8 +121,9 @@
 ### kream/crawler.py
 - Kream은 Vue SPA: `page.goto(search_url)` 시 HTML 39 bytes로 미렌더링  
   → `page.evaluate("window.location.href = url")`로 SPA 내부 라우팅 트리거
-- 검색 결과 선택: 거래량 최다 → **첫 번째 상품**(검색 결과 맨 왼쪽)
-- 검색 간 딜레이 8~15초, 차단 시 새 stealth 페이지 생성 + 지수 백오프 (30→60→120초)
+- SUPERSEDED (2026-08-05): 검색 결과 선택을 거래량 최다에서 첫 번째 상품(검색 결과 맨 왼쪽)으로 변경 — 유사 검색 오탐 때문에 상세 모델번호 완전 일치 검증으로 교체했다.
+- 검색 간 딜레이 8~15초, 차단 시 지수 백오프 (30→60→120초)
+  - SUPERSEDED (2026-04-13): 재시도마다 새 stealth 페이지 생성 — 페이지 풀 정합성을 위해 같은 페이지를 Kream 홈으로 재이동하도록 교체했다.
 
 ### common/browser.py
 - `USER_AGENTS`: Chrome 130~136 기반 12종 (Mac 4, Windows 5, Linux 3)

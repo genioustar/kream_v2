@@ -12,7 +12,7 @@ from common.browser import create_browser, new_stealth_page
 from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
-from naver.parser import clean_url, get_selectors, parse_price
+from naver.parser import clean_url, get_selectors, page_origin, parse_price
 
 logger = get_logger("naver.crawler")
 
@@ -167,6 +167,7 @@ async def _extract_product(
     store_type: str,
     model_strategy: str,
     crawled_at: str,
+    page_url: str,
 ) -> tuple[list[MarketplaceProduct], str | None]:
     """
     단일 상품 카드 Locator에서 상품 목록과 건너뜀 사유를 추출합니다.
@@ -206,7 +207,7 @@ async def _extract_product(
         # URL
         url_el = item.locator(selectors["url"]).first
         raw_url = await url_el.get_attribute("href")
-        product_url = clean_url(raw_url)
+        product_url = clean_url(raw_url, page_origin(page_url))
 
         # 모델명 목록 추출 (복수 가능)
         model_names = extract_model_names(product_name, strategy=model_strategy)
@@ -307,6 +308,7 @@ async def _crawl_site(
                 store_type,
                 model_strategy,
                 crawled_at,
+                page.url,
             )
             if extracted:
                 products.extend(extracted)

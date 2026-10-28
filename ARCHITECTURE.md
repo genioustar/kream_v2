@@ -203,7 +203,8 @@ resell-sniper/
 - `SELECTORS` — 스토어 타입별 CSS 셀렉터 딕셔너리. `price` 키는 fallback 후보 리스트(list[str])로 관리
 - `get_selectors(store_type)` — 스토어 타입에 맞는 셀렉터 딕셔너리 반환
 - `parse_price(price_str)` — 가격 문자열에서 숫자 추출
-- `clean_url(raw_url, base)` — 상대 URL → 절대 URL 변환
+- `page_origin(page_url)` — 카드를 연 페이지의 origin
+- `clean_url(raw_url, base)` — 상대 URL을 `base` origin 기준 절대 URL로 변환. `base`는 호출자가 넘긴다.
 
 ### naver/crawler.py
 - `_is_sold_out_product(item, store_type)` — `smart_store` 카드에서 `품절` 오버레이 또는 `일시품절` 배송 문구를 감지하면 수집 대상에서 제외한다. 제외된 상품은 `marketplace_products.json`에 저장되지 않아 Kream 조회 대상에서도 빠진다.
@@ -211,7 +212,7 @@ resell-sniper/
 - 페이지 생성은 `common.browser.new_stealth_page()`를 사용한다.
 - `_wait_for_product_list(page, item_selector, site_name, manual_input_lock)` — 상품 목록이 15초 내 나타나지 않으면 열린 Chrome에서 로그인·보안 확인을 마친 사용자의 Enter 입력을 기다린다. 병렬 프롬프트는 잠금으로 직렬화하고 `q` 입력 시 해당 사이트를 중단한다.
 - `_scroll_to_bottom(page, item_selector)` — 무한스크롤 처리
-- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at)` — 단일 상품 카드 파싱. 성공 시 상품 목록과 `None`을, 건너뛸 때는 빈 목록과 `품절`·`모델명 없음`·`파싱 오류` 중 하나를 반환한다. 사이트 전략으로 모델명을 복수 변환한다.
+- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at, page_url)` — 단일 상품 카드 파싱. 상품 URL의 기준은 `page_url`의 origin이다. 성공 시 상품 목록과 `None`을, 건너뛸 때는 빈 목록과 `품절`·`모델명 없음`·`파싱 오류` 중 하나를 반환한다. 사이트 전략으로 모델명을 복수 변환한다.
 - `_crawl_site(context, site_info, manual_input_lock)` — 단일 사이트 크롤링. `site_info.model_strategy`를 추출기에 전달하며 미설정 시 `auto`; 지원하지 않는 값은 크롤링 전에 해당 사이트 설정 오류로 처리한다. 완료 로그는 총 건너뜀 수와 품절·모델명 없음·파싱 오류별 건수를 함께 출력한다.
 - `crawl_marketplace()` — config.SEARCH_URLS 대상 병렬 크롤링. SEARCH_URLS 가 비어있거나 유효한 url 항목이 하나도 없으면 [] 반환. 항목별 url 누락 시 해당 사이트만 스킵하고 나머지는 진행.
 

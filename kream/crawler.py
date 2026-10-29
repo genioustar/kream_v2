@@ -504,7 +504,11 @@ if __name__ == "__main__":
 
         print(f"검색할 모델명: {len(unique_models)}개")
 
-        async with create_browser(headless=False) as context:
+        async with create_browser(
+            headless=False,
+            channel="chrome",
+            use_native_fingerprint=True,
+        ) as context:
             page = await init_kream_page(context)
             for mn in unique_models:
                 results = await search_kream(mn, page)

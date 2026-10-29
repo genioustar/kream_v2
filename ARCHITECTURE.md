@@ -145,7 +145,7 @@ resell-sniper/
 - `_get_client_hints(ua)` — UA에서 Chrome 버전·플랫폼을 추출해 `sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform` 헤더 생성
 - `_load_cookies(context, cookie_file)` / `_save_cookies(context, cookie_file)` — 호출 소스가 지정한 파일에 쿠키 영속화
 - `create_browser(headless, channel, cookie_file, use_native_fingerprint)` — 기본은 UA 1회 선택·Client Hints 주입·Kream 쿠키 재사용. 소스별 브라우저 채널·쿠키 파일을 선택하고 실제 브라우저 fingerprint를 그대로 쓸 수 있다.
-- `new_stealth_page(context)` — playwright-stealth 적용 + webdriver 탐지 제거
+- `new_stealth_page(context)` — playwright-stealth를 적용하고 `navigator.webdriver`만 가린다. 플러그인 목록과 `window.chrome`은 브라우저 값 그대로 둔다.
 
 ### nike/crawler.py
 - `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **실제 Chrome CDP 연결 필수** (`connect_over_cdp("http://127.0.0.1:9222")`). Kasada 탐지로 Playwright Chromium은 차단됨. URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
@@ -228,6 +228,7 @@ resell-sniper/
 
 ### kream/crawler.py
 - `init_kream_page(context)` — stealth 페이지 생성 후 메인 페이지 1회 방문
+- Kream은 설치된 Chrome 채널을 headful로 열고, UA와 Client Hints는 그 브라우저 값을 쓴다.
 - `search_kream(model_name, page)` — 차단 시 지수 백오프 재시도. 새 페이지를 만들지 않고 같은 페이지를 Kream 홈으로 재이동
 - `_open_search_and_get_input(page)` — 입력창이 이미 보이면 바로 반환(검색 결과 페이지), 없으면 헤더 검색 버튼 클릭 후 반환
 - `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → Enter → 결과 파싱

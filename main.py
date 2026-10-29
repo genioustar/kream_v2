@@ -314,7 +314,11 @@ async def main(mode: str) -> None:
 
         kream_products_map: dict = {}
 
-        async with create_browser(headless=False) as context:
+        async with create_browser(
+            headless=False,
+            channel="chrome",
+            use_native_fingerprint=True,
+        ) as context:
             page_pool: asyncio.Queue = asyncio.Queue()
             for i in range(config.KREAM_MAX_CONCURRENCY):
                 logger.info(f"페이지 풀 초기화 [{i+1}/{config.KREAM_MAX_CONCURRENCY}]")

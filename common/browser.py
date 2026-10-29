@@ -186,14 +186,5 @@ async def new_stealth_page(context):
         Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
         });
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5],
-        });
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['ko-KR', 'ko', 'en-US', 'en'],
-        });
-        window.chrome = {
-            runtime: {},
-        };
     """)
     return page

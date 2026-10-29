@@ -32,7 +32,7 @@ SEARCH_URLS = [
     },
     {
         "site_name": "artemoa",
-        "url": "https://smartstore.naver.com/artemoa/category/4189ca0f9ee448be913cd0123f7fd0e3?cp=1",
+        "url": "https://smartstore.naver.com/artemoa/best?cp=1",
         "type": "smart_store",
         "model_strategy": "auto",
     },

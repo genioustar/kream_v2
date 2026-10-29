@@ -57,12 +57,12 @@ OUTPUT_DIR = "output"
 #ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
 #SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"
 SPECIAL_MODEL_STRATEGY = "auto"
-MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+#MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
 
 # 사이트별 수동 할인율 (%) — Kream 외 크롤러에 적용. 0이면 sale_price 미산출.
 SITE_DISCOUNT_RATES = {
     "marketplace": 0,
-    "adidas": 30,
+    "adidas": 0,
     "musinsa": 0,
     "nike": 0,
     "special": 0,

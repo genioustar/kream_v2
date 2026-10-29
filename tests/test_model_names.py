@@ -303,6 +303,8 @@ class MusinsaPaginationTests(unittest.IsolatedAsyncioTestCase):
 class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
     async def test_waits_for_enter_and_rechecks_product_list(self):
         page = MagicMock()
+        page.url = "https://smartstore.naver.com/example"
+        page.bring_to_front = AsyncMock()
         page.wait_for_selector = AsyncMock(
             side_effect=[TimeoutError("initial timeout"), None]
         )
@@ -319,6 +321,7 @@ class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
                 "li.product",
                 "test-store",
                 asyncio.Lock(),
+                "https://smartstore.naver.com/example",
             )
 
         to_thread.assert_awaited_once()
@@ -326,6 +329,8 @@ class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_q_aborts_manual_wait(self):
         page = MagicMock()
+        page.url = "https://smartstore.naver.com/example"
+        page.bring_to_front = AsyncMock()
         page.wait_for_selector = AsyncMock(side_effect=TimeoutError("timeout"))
         locator = MagicMock()
         locator.count = AsyncMock(return_value=0)
@@ -343,10 +348,13 @@ class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
                 "li.product",
                 "test-store",
                 asyncio.Lock(),
+                "https://smartstore.naver.com/example",
             )
 
     async def test_noninteractive_eof_fails_explicitly(self):
         page = MagicMock()
+        page.url = "https://smartstore.naver.com/example"
+        page.bring_to_front = AsyncMock()
         page.wait_for_selector = AsyncMock(side_effect=TimeoutError("timeout"))
         locator = MagicMock()
         locator.count = AsyncMock(return_value=0)
@@ -364,6 +372,7 @@ class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
                 "li.product",
                 "test-store",
                 asyncio.Lock(),
+                "https://smartstore.naver.com/example",
             )
 
     async def test_invalid_strategy_fails_before_browser_use(self):

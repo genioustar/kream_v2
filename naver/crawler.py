@@ -6,9 +6,10 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 import config
-from common.browser import create_browser, new_stealth_page
+from common.browser import _save_cookies, create_browser, new_stealth_page
 from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
@@ -38,37 +39,94 @@ SKIP_REASONS = (
 )
 
 
+def _is_naver_login_gate(url: str) -> bool:
+    """스토어 문서가 아니라 네이버 로그인 호스트면 상품 카드를 기다리지 않는다."""
+    return urlsplit(url).netloc.lower() == "nid.naver.com"
+
+
+async def _reopen_store(page, site_name: str, target_url: str) -> None:
+    logger.info(f"[{site_name}] 로그인 확인 후 원래 주소로 이동: {target_url}")
+    try:
+        await page.goto(
+            target_url,
+            wait_until="domcontentloaded",
+            timeout=PAGE_LOAD_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.warning(f"[{site_name}] 원래 주소 재이동 미완료: {exc}")
+
+
 async def _wait_for_product_list(
     page,
     item_selector: str,
     site_name: str,
     manual_input_lock: asyncio.Lock,
+    target_url: str,
+    login_ready: asyncio.Event | None = None,
 ) -> None:
     """
     상품 목록이 자동으로 나타나지 않으면 사용자의 브라우저 조치를 기다린다.
 
     여러 사이트를 병렬로 열어도 입력 프롬프트는 한 번에 하나만 표시한다.
-    사용자가 열린 Chrome에서 로그인/보안 확인을 마치고 Enter를 누르면
-    목록을 다시 확인하며, ``q`` 입력 시 해당 사이트를 중단한다.
+    로그인 화면이면 상품 카드를 찾지 않고, 사용자가 로그인한 뒤 Enter를 누르면
+    요청한 스토어 주소로 다시 이동한다. 그 세션은 쿠키 파일에 바로 저장하고,
+    같은 실행의 다른 로그인 탭은 추가 입력 없이 각자 주소로 다시 연다.
+    ``q`` 입력 시 해당 사이트를 중단한다.
     """
-    try:
-        await page.wait_for_selector(
-            item_selector,
-            state="attached",
-            timeout=INITIAL_PRODUCT_WAIT_MS,
-        )
-        return
-    except Exception:
+    if login_ready is None:
+        login_ready = asyncio.Event()
+    saw_login_gate = _is_naver_login_gate(page.url)
+    if not saw_login_gate:
+        try:
+            await page.wait_for_selector(
+                item_selector,
+                state="attached",
+                timeout=INITIAL_PRODUCT_WAIT_MS,
+            )
+            return
+        except Exception:
+            logger.warning(
+                f"[{site_name}] 상품 목록이 자동으로 표시되지 않음 — 사용자 입력 대기"
+            )
+    else:
         logger.warning(
-            f"[{site_name}] 상품 목록이 자동으로 표시되지 않음 — 사용자 입력 대기"
+            f"[{site_name}] 요청 주소가 네이버 로그인으로 이동함. 원하는 주소: {target_url}"
         )
 
     async with manual_input_lock:
-        while await page.locator(item_selector).count() == 0:
-            prompt = (
-                f"\n[{site_name}] 열린 Chrome에서 로그인/보안 확인을 완료한 뒤 "
-                "Enter를 누르세요. 이 사이트를 중단하려면 q 입력: "
-            )
+        while _is_naver_login_gate(page.url) or await page.locator(item_selector).count() == 0:
+            saw_login_gate = saw_login_gate or _is_naver_login_gate(page.url)
+            if _is_naver_login_gate(page.url) and login_ready.is_set():
+                await _reopen_store(page, site_name, target_url)
+                if _is_naver_login_gate(page.url):
+                    logger.warning(f"[{site_name}] 저장된 세션으로도 로그인 화면입니다.")
+                else:
+                    try:
+                        await page.wait_for_selector(
+                            item_selector,
+                            state="attached",
+                            timeout=MANUAL_PRODUCT_WAIT_MS,
+                        )
+                    except Exception:
+                        logger.warning(
+                            f"[{site_name}] 상품 목록이 아직 표시되지 않음. 다시 입력 대기"
+                        )
+                    continue
+
+            try:
+                await page.bring_to_front()
+            except Exception:
+                logger.debug(f"[{site_name}] 로그인 탭을 앞으로 가져오지 못함")
+            if _is_naver_login_gate(page.url):
+                prompt = (
+                    f"\n[{site_name}] 앞에 온 Chrome 탭에서 네이버에 로그인한 뒤 "
+                    "Enter를 누르세요. 이 사이트를 중단하려면 q 입력: "
+                )
+            else:
+                prompt = (
+                    f"\n[{site_name}] 열린 Chrome에서 로그인/보안 확인을 완료한 뒤 "
+                    "Enter를 누르세요. 이 사이트를 중단하려면 q 입력: "
+                )
             try:
                 answer = await asyncio.to_thread(input, prompt)
             except EOFError as exc:
@@ -79,6 +137,13 @@ async def _wait_for_product_list(
             if answer.strip().casefold() == "q":
                 raise RuntimeError(f"[{site_name}] 사용자가 크롤링을 중단했습니다.")
 
+            if _is_naver_login_gate(page.url):
+                await _reopen_store(page, site_name, target_url)
+
+            if _is_naver_login_gate(page.url):
+                logger.warning(f"[{site_name}] 아직 네이버 로그인 화면. 다시 입력 대기")
+                continue
+
             try:
                 await page.wait_for_selector(
                     item_selector,
@@ -87,8 +152,13 @@ async def _wait_for_product_list(
                 )
             except Exception:
                 logger.warning(
-                    f"[{site_name}] 상품 목록이 아직 표시되지 않음 — 다시 입력 대기"
+                    f"[{site_name}] 상품 목록이 아직 표시되지 않음. 다시 입력 대기"
                 )
+
+        if saw_login_gate and not _is_naver_login_gate(page.url):
+            await _save_cookies(page.context, NAVER_COOKIE_FILE)
+            login_ready.set()
+            logger.info(f"[{site_name}] 네이버 로그인 세션을 저장했습니다.")
 
 
 async def _is_sold_out_product(item, store_type: str) -> bool:
@@ -239,6 +309,7 @@ async def _crawl_site(
     context,
     site_info: dict,
     manual_input_lock: asyncio.Lock,
+    login_ready: asyncio.Event | None = None,
 ) -> list[MarketplaceProduct]:
     """
     단일 네이버 사이트(브랜드스토어 or 스마트스토어)를 크롤링합니다.
@@ -285,6 +356,8 @@ async def _crawl_site(
             selectors["item"],
             site_name,
             manual_input_lock,
+            url,
+            login_ready,
         )
 
         # 무한스크롤 처리
@@ -368,6 +441,7 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
         return []
 
     manual_input_lock = asyncio.Lock()
+    login_ready = asyncio.Event()
     async with create_browser(
         headless=False,
         channel="chrome",
@@ -375,7 +449,7 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
         use_native_fingerprint=True,
     ) as context:
         tasks = [
-            _crawl_site(context, site_info, manual_input_lock)
+            _crawl_site(context, site_info, manual_input_lock, login_ready)
             for site_info in valid_sites
         ]
         gather_results = await asyncio.gather(*tasks, return_exceptions=True)

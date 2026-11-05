@@ -1,4 +1,3 @@
-import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,7 +10,7 @@ from musinsa.crawler import (
     _to_marketplace_products as to_musinsa_products,
     _to_ranking_marketplace_products as to_musinsa_ranking_products,
 )
-from naver.crawler import _crawl_site, _wait_for_product_list, crawl_marketplace
+from naver.crawler import _crawl_site, crawl_marketplace
 from special.crawler import _to_marketplace_products as to_special_products
 
 
@@ -300,72 +299,7 @@ class MusinsaPaginationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetch.await_count, 2)
 
 
-class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
-    async def test_waits_for_enter_and_rechecks_product_list(self):
-        page = MagicMock()
-        page.wait_for_selector = AsyncMock(
-            side_effect=[TimeoutError("initial timeout"), None]
-        )
-        locator = MagicMock()
-        locator.count = AsyncMock(side_effect=[0, 1])
-        page.locator.return_value = locator
-
-        with patch(
-            "naver.crawler.asyncio.to_thread",
-            new=AsyncMock(return_value=""),
-        ) as to_thread:
-            await _wait_for_product_list(
-                page,
-                "li.product",
-                "test-store",
-                asyncio.Lock(),
-            )
-
-        to_thread.assert_awaited_once()
-        self.assertEqual(page.wait_for_selector.await_count, 2)
-
-    async def test_q_aborts_manual_wait(self):
-        page = MagicMock()
-        page.wait_for_selector = AsyncMock(side_effect=TimeoutError("timeout"))
-        locator = MagicMock()
-        locator.count = AsyncMock(return_value=0)
-        page.locator.return_value = locator
-
-        with (
-            patch(
-                "naver.crawler.asyncio.to_thread",
-                new=AsyncMock(return_value="q"),
-            ),
-            self.assertRaises(RuntimeError),
-        ):
-            await _wait_for_product_list(
-                page,
-                "li.product",
-                "test-store",
-                asyncio.Lock(),
-            )
-
-    async def test_noninteractive_eof_fails_explicitly(self):
-        page = MagicMock()
-        page.wait_for_selector = AsyncMock(side_effect=TimeoutError("timeout"))
-        locator = MagicMock()
-        locator.count = AsyncMock(return_value=0)
-        page.locator.return_value = locator
-
-        with (
-            patch(
-                "naver.crawler.asyncio.to_thread",
-                new=AsyncMock(side_effect=EOFError),
-            ),
-            self.assertRaisesRegex(RuntimeError, "사용자 입력을 받을 수 없음"),
-        ):
-            await _wait_for_product_list(
-                page,
-                "li.product",
-                "test-store",
-                asyncio.Lock(),
-            )
-
+class NaverConfigurationTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_strategy_fails_before_browser_use(self):
         site = {
             "site_name": "bad-config",
@@ -374,7 +308,7 @@ class NaverManualWaitTests(unittest.IsolatedAsyncioTestCase):
             "model_strategy": "typo",
         }
         with self.assertRaises(ValueError):
-            await _crawl_site(None, site, asyncio.Lock())
+            await _crawl_site(None, site)
 
     async def test_public_crawl_rejects_strategy_before_browser_creation(self):
         site = {

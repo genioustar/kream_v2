@@ -1,40 +1,36 @@
-"""Chrome CDP 디버깅 모드 실행 스크립트 (Windows/macOS 공용)"""
-import subprocess
+"""ego lite Task Space 연결을 확인한다.
+
+크롤러는 새 브라우저 창을 만들지 않는다. 이미 설치된 ego lite 안에서
+resell-sniper Space 를 열고, 확인이 끝나면 그 Space 만 닫는다.
+"""
+import asyncio
 import sys
-import time
-import urllib.request
-from pathlib import Path
 
-if sys.platform == "win32":
-    CHROME_BIN = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-    CHROME_DIR = r"C:\Temp\chrome-cdp"
-else:
-    CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    CHROME_DIR = "/tmp/chrome-cdp"
+from common.logger import get_logger
+
+logger = get_logger("chrome")
 
 
-def is_cdp_running() -> bool:
+async def check_connection() -> bool:
+    """사이트를 열지 않고 webdriver 표시가 켜져 있지 않은지 확인한다."""
+    from common.browser import create_browser
+
+    async with create_browser() as tabs:
+        page = await tabs.new_page()
+        await page.goto("about:blank")
+        webdriver = await page.evaluate("() => navigator.webdriver === true")
+    logger.info("ego lite 연결 확인 — navigator.webdriver === true 은 %s", webdriver)
+    return webdriver is not True
+
+
+def main() -> int:
     try:
-        urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2)
-        return True
-    except Exception:
-        return False
+        ok = asyncio.run(check_connection())
+    except (RuntimeError, OSError) as exc:
+        logger.error("%s", exc)
+        return 1
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    if is_cdp_running():
-        print("Chrome CDP already running (port 9222)")
-        sys.exit(0)
-
-    Path(CHROME_DIR).mkdir(parents=True, exist_ok=True)
-    subprocess.Popen([
-        CHROME_BIN,
-        "--remote-debugging-port=9222",
-        f"--user-data-dir={CHROME_DIR}",
-        "--no-first-run",
-    ])
-    time.sleep(3)
-    if is_cdp_running():
-        print("Chrome CDP ready (port 9222)")
-    else:
-        print("Chrome CDP not ready yet — retry in a moment")
+    sys.exit(main())

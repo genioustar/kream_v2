@@ -92,6 +92,13 @@ class KreamCandidateVerificationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class KreamDetailModelLoadingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        for patcher in (
+            patch("kream.crawler._is_blocked_page", new=AsyncMock(return_value=False)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     async def test_reads_model_number_from_server_response_without_dom_wait(self):
         response = MagicMock()
         response.text = AsyncMock(

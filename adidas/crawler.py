@@ -1,28 +1,27 @@
 """
 adidas/crawler.py
-아디다스 공홈 Extra Sale 신발 페이지 크롤러.
+아디다스 공홈 세일 목록 크롤러.
 
-Akamai Bot Manager 우회를 위해 실제 크롬에 CDP로 연결한다.
-Playwright가 직접 띄운 브라우저는 Akamai fingerprint 탐지에 걸리지만,
-실제 크롬은 쿠키·fingerprint가 정상이므로 차단되지 않는다.
-
-사전 준비:
-  크롬을 --remote-debugging-port=9222 옵션으로 실행해야 한다.
-  macOS: open -a "Google Chrome" --args --remote-debugging-port=9222
+확장 없이 독립 Chrome 창에서 동작한다.
+사전 준비: ego lite 설치.
 """
 import asyncio
 import json
 import random
+import re
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import config
+from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
+from common.pacing import CrawlBlockedError
 
 logger = get_logger("adidas.crawler")
 
@@ -32,7 +31,6 @@ logger = get_logger("adidas.crawler")
 SITE_NAME             = "adidas"
 PAGE_LOAD_TIMEOUT     = 60_000
 SELECTOR_TIMEOUT      = 15_000
-CDP_URL               = "http://127.0.0.1:9222"
 
 # 상품 카드 셀렉터 후보 (앞에서부터 시도)
 # article[class*="product"] 를 우선 — product-card 는 너무 광범위하게 매칭됨
@@ -48,6 +46,8 @@ NEXT_BTN_SELECTOR = '[data-testid="pagination-next-button"]'
 
 # 페이지 로드 후 카드 렌더링 대기 시간 (초)
 PAGE_SETTLE_SEC = 3.0
+MAX_RATE_LIMIT_RETRIES = 2
+MAX_RETRY_WAIT_SEC = 60
 
 # ---------------------------------------------------------------------------
 # JS 추출 함수 (page.evaluate 에 전달)
@@ -92,36 +92,137 @@ _JS_EXTRACT = """(cardSelector) => {
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-async def _find_card_selector(page) -> str | None:
-    """
-    CARD_SELECTORS 순서로 시도하여 실제 DOM에 존재하는 셀렉터를 반환한다.
-    각 셀렉터는 wait_for_selector 로 렌더링 완료까지 대기한다.
-    모든 셀렉터 실패 시 진단 정보를 WARNING 로그에 출력한다.
-    """
-    for sel in CARD_SELECTORS:
+def _raise_http_error(status: int, url: str, retry_after: str | None = None) -> None:
+    if status < 400:
+        return
+    advice = {
+        400: "요청 URL과 쿼리를 확인하세요.",
+        401: "사이트의 로그인 요구를 확인하세요.",
+        403: "접근이 거부되었습니다. 일반 Chrome 접속 결과와 비교하세요.",
+        404: "현재 세일 메뉴에서 URL을 확인하세요.",
+        410: "종료된 페이지입니다. 현재 세일 메뉴에서 URL을 확인하세요.",
+        429: f"요청 제한입니다. Retry-After={retry_after!r}; 제한 해제 후 실행하세요.",
+    }.get(status, "서버 응답을 확인하세요.")
+    error_type = CrawlBlockedError if status in (403, 429) else RuntimeError
+    raise error_type(f"아디다스 HTTP {status}: {url} — {advice}")
+
+
+def _retry_delay(retry_after: str | None, attempt: int) -> float:
+    """Retry-After의 초/HTTP-date 지원. 누락·잘못된 값은 지수 대기."""
+    if retry_after:
         try:
-            await page.wait_for_selector(sel, timeout=SELECTOR_TIMEOUT)
-            count = await page.locator(sel).count()
-            if count > 0:
-                logger.debug(f"카드 셀렉터 탐지: {sel!r} ({count}개)")
-                return sel
-        except Exception as exc:
-            logger.debug(f"셀렉터 실패 {sel!r}: {type(exc).__name__}")
-            continue
+            return max(0, int(retry_after))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                return max(0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+            except (ValueError, TypeError, OverflowError):
+                pass
+    return 5 * 2 ** attempt
 
-    # 모든 셀렉터 실패 — 페이지 상태 진단
-    try:
-        current_url = page.url
-        title = await page.title()
-        body_text = await page.evaluate("() => document.body?.innerText?.slice(0, 500) || ''")
-        logger.warning(
-            f"셀렉터 전부 실패 — 현재 URL: {current_url} | 제목: {title!r} | "
-            f"본문 앞 500자: {body_text!r}"
+
+class _ResponseDiagnostics:
+    """문서와 XHR/fetch 오류 기록. 목록에 필요한 응답만 중단에 반영."""
+
+    def __init__(self, page):
+        self.page = page
+        self.errors = []
+        self.fatal_response = None
+
+    def on_response(self, response):
+        kind = response.request.resource_type
+        if kind not in ("document", "xhr", "fetch"):
+            return
+        if kind == "document":
+            logger.info("문서 응답: HTTP %s %s", response.status, response.url)
+        if response.status < 400:
+            return
+        logger.warning("HTTP 오류: %s %s %s", response.status, kind, response.url)
+        self.errors.append(response)
+        self.errors = self.errors[-30:]
+        parsed = urlparse(response.url)
+        host = parsed.hostname or ""
+        # 개별 상품 보조 API가 403이어도 목록 HTML의 코드·가격은 정상일 수 있다.
+        # 실제 관측 경로만 제외하고 목록 API의 실패는 계속 중단한다.
+        product_detail = re.fullmatch(r"/plp-app/api/product/[^/]+/?", parsed.path) is not None
+        product_api = (
+            (host == "adidas.co.kr" or host.endswith(".adidas.co.kr"))
+            and "/api/" in parsed.path
+            and any(part in parsed.path.lower() for part in ("product", "plp", "search"))
+            and not product_detail
         )
-    except Exception as diag_exc:
-        logger.warning(f"셀렉터 실패 진단 중 오류: {diag_exc}")
+        main_document = kind == "document" and response.request.frame == self.page.main_frame
+        if main_document or (kind in ("xhr", "fetch") and product_api):
+            self.fatal_response = response
 
-    return None
+    def check(self):
+        if self.fatal_response is not None:
+            response = self.fatal_response
+            _raise_http_error(response.status, response.url, response.headers.get("retry-after"))
+
+    async def save(self, error):
+        """진단 저장 실패가 원래 오류를 덮지 않게 하며 쿠키·인증 헤더는 저장하지 않는다."""
+        try:
+            directory = Path(config.OUTPUT_DIR) / date.today().strftime("%Y%m%d") / "diagnostics"
+            directory.mkdir(parents=True, exist_ok=True)
+            prefix = directory / f"adidas_{datetime.now():%H%M%S_%f}"
+            data = {"error": str(error), "url": self.page.url, "responses": []}
+            for response in self.errors:
+                item = {"status": response.status, "url": response.url,
+                        "resource_type": response.request.resource_type,
+                        "retry_after": response.headers.get("retry-after")}
+                try:
+                    item["body_excerpt"] = (await asyncio.wait_for(response.text(), 2))[:2000]
+                except Exception:
+                    item["body_excerpt"] = "응답 본문을 읽을 수 없습니다."
+                data["responses"].append(item)
+            try:
+                data["title"] = await self.page.title()
+                data["body_excerpt"] = await self.page.evaluate("() => document.body?.innerText?.slice(0, 2000) || ''")
+                await self.page.screenshot(path=str(prefix.with_suffix(".png")), timeout=5000)
+            except Exception as exc:
+                data["capture_error"] = str(exc)
+            prefix.with_suffix(".json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.error("아디다스 실패 진단 저장: %s.json", prefix)
+        except Exception as exc:
+            logger.warning("아디다스 진단 저장 실패: %s", exc)
+
+
+async def _navigate(page, sale_url: str, diagnostics: _ResponseDiagnostics) -> None:
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        diagnostics.fatal_response = None
+        response = await page.goto(sale_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
+        if response is None:
+            raise RuntimeError("아디다스 문서 응답이 없습니다.")
+        retry_after = response.headers.get("retry-after")
+        if response.status == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
+            delay = _retry_delay(retry_after, attempt)
+            if delay <= MAX_RETRY_WAIT_SEC:
+                logger.warning("HTTP 429 — %.1f초 후 재시도 (%s/%s)", delay, attempt + 1, MAX_RATE_LIMIT_RETRIES)
+                await asyncio.sleep(delay)
+                continue
+        _raise_http_error(response.status, response.url, retry_after)
+        diagnostics.check()
+        return
+
+
+async def _find_card_selector(page, diagnostics: _ResponseDiagnostics) -> str:
+    for _ in range(SELECTOR_TIMEOUT // 1000):
+        diagnostics.check()
+        try:
+            await page.wait_for_selector(
+                ", ".join(CARD_SELECTORS), state="attached", timeout=1000,
+            )
+        except PlaywrightTimeoutError:
+            continue
+        diagnostics.check()
+        for selector in CARD_SELECTORS:
+            if await page.locator(selector).count():
+                return selector
+    diagnostics.check()
+    raise RuntimeError("아디다스 상품 카드를 찾지 못했습니다. 상품 0개로 처리하지 않습니다.")
 
 
 
@@ -174,110 +275,66 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
 # ---------------------------------------------------------------------------
 
 async def crawl_adidas() -> list[MarketplaceProduct]:
-    """
-    실제 크롬(CDP)에 연결하여 아디다스 Extra Sale 신발 페이지를 크롤링한다.
-
-    Akamai Bot Manager 우회를 위해 CDP 연결 방식을 사용한다.
-    실행 전 크롬을 --remote-debugging-port=9222 로 먼저 실행해야 한다.
-
-    Returns:
-        MarketplaceProduct 포맷으로 수집된 아디다스 상품 목록.
-        config.ADIDAS_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
-    """
-    sale_url = getattr(config, "ADIDAS_SALE_URL", "") or ""
-    if not sale_url.strip():
+    """세일 목록을 수집한다. 미설정은 [], 접근·수집 실패는 예외로 구분한다."""
+    sale_url = (getattr(config, "ADIDAS_SALE_URL", "") or "").strip()
+    if not sale_url:
         logger.info("config.ADIDAS_SALE_URL 미설정 — 아디다스 크롤링 건너뜀")
         return []
 
-    # redirect 감지용 키워드: URL path 의 마지막 segment
-    # 예) /extra_sale-shoes?sort=... → "extra_sale-shoes"
-    expected_segment = urlparse(sale_url).path.rstrip("/").rsplit("/", 1)[-1]
-
+    expected_path = urlparse(sale_url).path.rstrip("/")
     all_products: list[MarketplaceProduct] = []
-
-    pw = await async_playwright().start()
-    try:
-        # 실제 크롬에 CDP 연결
-        try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
-            logger.info(f"실제 크롬 CDP 연결 성공 ({CDP_URL})")
-        except Exception as exc:
-            logger.error(
-                f"크롬 CDP 연결 실패: {exc}\n"
-                f"크롬을 디버깅 포트로 실행해주세요:\n"
-                f"  macOS: open -a \"Google Chrome\" --args --remote-debugging-port=9222\n"
-                f"  이미 크롬이 열려있으면 완전히 종료 후 위 명령 실행"
-            )
-            return []
-
-        # 기존 컨텍스트의 새 탭 사용 (실제 크롬 쿠키·fingerprint 유지)
-        context = browser.contexts[0]
+    async with create_browser() as context:
         page = await context.new_page()
-
-        logger.info(f"아디다스 Extra Sale 페이지 이동: {sale_url}")
+        diagnostics = _ResponseDiagnostics(page)
+        page.on("response", diagnostics.on_response)
         try:
-            await page.goto(
-                sale_url,
-                wait_until="domcontentloaded",
-                timeout=PAGE_LOAD_TIMEOUT,
-            )
+            logger.info("아디다스 세일 페이지 이동: %s", sale_url)
+            await _navigate(page, sale_url, diagnostics)
+            logger.info("페이지 로드 완료 — URL: %s | 제목: %r", page.url, await page.title())
+            if urlparse(page.url).path.rstrip("/") != expected_path:
+                raise RuntimeError(f"아디다스 세일 URL이 다른 페이지로 이동했습니다: {page.url}")
+
+            card_selector = await _find_card_selector(page, diagnostics)
+            logger.info("카드 셀렉터 사용: %r", card_selector)
+            seen_codes: set[str] = set()
+            seen_pages = set()
+            page_num = 1
+            while True:
+                await asyncio.sleep(PAGE_SETTLE_SEC)
+                diagnostics.check()
+                # Kids만 있는 페이지도 구분할 수 있도록 필터 전 링크로 진행을 확인한다.
+                fingerprint = tuple(await page.locator(card_selector).evaluate_all(
+                    "cards => cards.map(c => c.querySelector('a[href*=\".html\"]')?.href || '')"
+                ))
+                if not fingerprint or not any(fingerprint) or fingerprint in seen_pages:
+                    raise RuntimeError("아디다스 페이지가 비었거나 다음 페이지로 진행되지 않았습니다.")
+                seen_pages.add(fingerprint)
+                products = await _extract_products(page, card_selector, seen_codes)
+                all_products.extend(products)
+                logger.info("페이지 %s: %s개 수집 (누적: %s개)", page_num, len(products), len(all_products))
+
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(1.0)
+                diagnostics.check()
+                next_btn = page.locator(NEXT_BTN_SELECTOR).first
+                if not await next_btn.is_visible() or await next_btn.is_disabled():
+                    logger.info("마지막 페이지 — 크롤링 완료")
+                    break
+                await next_btn.click()
+                await asyncio.sleep(random.uniform(8.0, 12.0))
+                diagnostics.check()
+                card_selector = await _find_card_selector(page, diagnostics)
+                page_num += 1
+            diagnostics.check()
         except Exception as exc:
-            logger.warning(f"goto 에러(계속 진행): {type(exc).__name__}: {exc}")
+            await diagnostics.save(exc)
+            raise
+        finally:
+            page.remove_listener("response", diagnostics.on_response)
+            if not page.is_closed():
+                await page.close()
 
-        # 페이지 최종 도착 상태 확인 (redirect 감지)
-        final_url = page.url
-        page_title = await page.title()
-        logger.info(f"페이지 로드 완료 — URL: {final_url} | 제목: {page_title!r}")
-        if expected_segment and expected_segment not in final_url:
-            logger.warning(
-                f"Extra Sale URL에서 다른 페이지로 이동됨 — 세일 종료 또는 차단 가능성 있음. "
-                f"현재 URL: {final_url}"
-            )
-
-        # 상품 카드 셀렉터 자동 탐지 (wait_for_selector 내장)
-        card_selector = await _find_card_selector(page)
-        if not card_selector:
-            logger.error("상품 카드 셀렉터를 찾을 수 없습니다. DOM 구조를 확인하세요.")
-            await page.close()
-            return []
-        logger.info(f"카드 셀렉터 사용: {card_selector!r}")
-
-        seen_codes: set[str] = set()
-        page_num = 1
-        while True:
-            logger.info(f"페이지 {page_num} 수집 중 (url={page.url})")
-
-            # 카드 렌더링 대기
-            await asyncio.sleep(PAGE_SETTLE_SEC)
-
-            products = await _extract_products(page, card_selector, seen_codes)
-            all_products.extend(products)
-            logger.info(f"페이지 {page_num}: {len(products)}개 수집 (누적: {len(all_products)}개)")
-
-            # 다음 페이지 버튼 탐색 (버튼이 viewport에 들어오도록 스크롤 후 확인)
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await asyncio.sleep(1.0)
-
-            next_btn = page.locator(NEXT_BTN_SELECTOR).first
-            try:
-                is_visible = await next_btn.is_visible(timeout=3000)
-            except Exception:
-                is_visible = False
-
-            if not is_visible:
-                logger.info("마지막 페이지 — 크롤링 완료")
-                break
-
-            await next_btn.click()
-            await asyncio.sleep(random.uniform(2.0, 3.0))
-            page_num += 1
-
-        await page.close()
-
-    finally:
-        await pw.stop()
-
-    logger.info(f"아디다스 크롤링 완료 — 총 {len(all_products)}개")
+    logger.info("아디다스 크롤링 완료 — 총 %s개", len(all_products))
     return all_products
 
 

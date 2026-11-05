@@ -2,11 +2,8 @@
 nike/crawler.py
 나이키 코리아(nike.com/kr) 세일 신발 페이지 크롤러.
 
-Kasada 봇 탐지 우회를 위해 실제 Chrome에 CDP로 연결한다.
-Playwright 자체 Chromium은 Kasada fingerprint 탐지에 걸려 무한스크롤 JS가 비활성화된다.
-
-사전 준비:
-  make chrome 으로 Chrome CDP를 먼저 실행해야 한다.
+확장 없이 독립 Chrome 창에서 동작한다.
+사전 준비: ego lite 설치.
 
 상품 수집 방식:
   스크롤로 Nike JS가 product_wall API를 호출하게 유도 → 응답 인터셉트 → JSON 파싱
@@ -21,9 +18,10 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page
 
 import config
+from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 
@@ -32,12 +30,11 @@ logger = get_logger("nike.crawler")
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-CDP_URL                 = "http://127.0.0.1:9222"  # make chrome으로 먼저 실행
 SITE_NAME               = "nike"
 PAGE_LOAD_TIMEOUT_MS    = 60_000
 PAGE_SETTLE_SEC         = 3.0
 SCROLL_STEP_PX          = 200     # 한 번에 스크롤할 픽셀 (천천히 내리기)
-SCROLL_STEP_DELAY_MS    = 1_200   # 스크롤 후 새 상품 로드 대기
+SCROLL_STEP_DELAY_MS    = 3_500   # 스크롤 후 새 상품 로드 대기
 NETWORK_IDLE_TIMEOUT_MS = 3_000
 MAX_SCROLL_ATTEMPTS     = 120     # 400px × 120 = 48,000px 최대 스크롤
 NO_CHANGE_LIMIT         = 6       # N회 연속 새 상품 없으면 스크롤 종료
@@ -235,11 +232,11 @@ async def crawl_nike() -> list[MarketplaceProduct]:
     """
     나이키 코리아 세일 신발 페이지를 크롤링하여 MarketplaceProduct 목록을 반환한다.
 
-    Kasada 우회를 위해 실제 Chrome CDP에 연결한다 (make chrome 선행 필요).
+    확장 없이 독립 Chrome 창에서 동작한다.
     스크롤로 product_wall API 호출을 유도하고 응답을 인터셉트해 파싱한다.
 
     Returns:
-        site_name='nike' 인 MarketplaceProduct 리스트. 연결 실패 또는 빈 결과 시 [] 반환.
+        site_name='nike' 인 MarketplaceProduct 리스트. 빈 결과 시 [] 반환.
         config.NIKE_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     """
     sale_url = getattr(config, "NIKE_SALE_URL", "") or ""
@@ -253,19 +250,7 @@ async def crawl_nike() -> list[MarketplaceProduct]:
 
     logger.info(f"나이키 세일 페이지 이동 중: {sale_url}")
 
-    pw = await async_playwright().start()
-    try:
-        try:
-            browser = await pw.chromium.connect_over_cdp(CDP_URL)
-            logger.info(f"실제 Chrome CDP 연결 성공 ({CDP_URL})")
-        except Exception as exc:
-            logger.error(
-                f"Chrome CDP 연결 실패: {exc}\n"
-                f"먼저 'make chrome'을 실행해 Chrome CDP를 시작하세요."
-            )
-            return []
-
-        context = browser.contexts[0]
+    async with create_browser() as context:
         page = await context.new_page()
 
         try:
@@ -293,9 +278,6 @@ async def crawl_nike() -> list[MarketplaceProduct]:
 
         finally:
             await page.close()
-
-    finally:
-        await pw.stop()
 
 
 # ---------------------------------------------------------------------------

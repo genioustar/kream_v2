@@ -6,28 +6,27 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import config
-from common.browser import create_browser, new_stealth_page
+from common.browser import create_browser
 from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
+from common.pacing import CrawlBlockedError, pause
+from naver.checkpoint import load_checkpoint, save_checkpoint
+from naver.diagnostics import NaverAccessError, NaverCollectionError, NaverDiagnostics, safe_url
 from naver.parser import clean_url, get_selectors, parse_price
+from naver.public_search import navigate_public_search
 
 logger = get_logger("naver.crawler")
 
 # 스크롤 관련 상수
-SCROLL_PAUSE_MS = 1500       # 스크롤 후 대기 시간 (밀리초)
+SCROLL_PAUSE_MS = 3500       # 스크롤 후 대기 시간 (밀리초)
 MAX_SCROLL_ATTEMPTS = 30     # 새 상품이 없을 때 최대 재시도 횟수
 PAGE_LOAD_TIMEOUT = 30_000   # 페이지 로드 타임아웃 (밀리초)
 INITIAL_PRODUCT_WAIT_MS = 15_000
 MANUAL_PRODUCT_WAIT_MS = 30_000
-NAVER_COOKIE_FILE = (
-    Path(__file__).parent.parent
-    / config.OUTPUT_DIR
-    / "session"
-    / "naver_cookies.json"
-)
 SKIP_REASON_SOLD_OUT = "품절"
 SKIP_REASON_MODEL_MISSING = "모델명 없음"
 SKIP_REASON_PARSE_ERROR = "파싱 오류"
@@ -38,57 +37,67 @@ SKIP_REASONS = (
 )
 
 
+async def _wait_for_operator(page, item_selector: str, site_name: str, diagnostics: NaverDiagnostics) -> None:
+    """로그인·보안 확인 화면에서 프로세스를 종료하지 않고 사용자 입력을 기다린다."""
+    logger.warning("[%s] 로그인/보안 확인 화면 — 종료하지 않고 입력을 기다립니다", site_name)
+    while await page.locator(item_selector).count() == 0:
+        prompt = (
+            f"\n[{site_name}] 열린 Chrome에서 로그인/보안 확인을 완료한 뒤 "
+            "Enter를 누르세요. 이 사이트를 중단하려면 q 입력: "
+        )
+        try:
+            answer = await asyncio.to_thread(input, prompt)
+        except EOFError as exc:
+            raise RuntimeError(
+                f"[{site_name}] 상품 목록 미표시 및 사용자 입력을 받을 수 없음"
+            ) from exc
+        if answer.strip().casefold() == "q":
+            raise RuntimeError(f"[{site_name}] 사용자가 크롤링을 중단했습니다.")
+        diagnostics.pause_reason = None
+        try:
+            await page.wait_for_selector(
+                item_selector, state="attached", timeout=MANUAL_PRODUCT_WAIT_MS,
+            )
+        except Exception:
+            logger.warning("[%s] 상품 목록이 아직 표시되지 않음 — 다시 입력 대기", site_name)
+        try:
+            await diagnostics.check("product_list")
+        except CrawlBlockedError:
+            raise
+    diagnostics.pause_reason = None
+
+
 async def _wait_for_product_list(
     page,
     item_selector: str,
     site_name: str,
-    manual_input_lock: asyncio.Lock,
+    diagnostics: NaverDiagnostics,
 ) -> None:
-    """
-    상품 목록이 자동으로 나타나지 않으면 사용자의 브라우저 조치를 기다린다.
-
-    여러 사이트를 병렬로 열어도 입력 프롬프트는 한 번에 하나만 표시한다.
-    사용자가 열린 Chrome에서 로그인/보안 확인을 마치고 Enter를 누르면
-    목록을 다시 확인하며, ``q`` 입력 시 해당 사이트를 중단한다.
-    """
+    """상품 목록을 기다린다. 로그인·보안 확인 화면이면 사용자가 끝낼 때까지 유지한다."""
     try:
-        await page.wait_for_selector(
-            item_selector,
-            state="attached",
-            timeout=INITIAL_PRODUCT_WAIT_MS,
+        await diagnostics.run(
+            page.wait_for_selector(item_selector, state="attached", timeout=INITIAL_PRODUCT_WAIT_MS),
+            "product_list",
         )
-        return
+    except CrawlBlockedError:
+        raise
     except Exception:
-        logger.warning(
-            f"[{site_name}] 상품 목록이 자동으로 표시되지 않음 — 사용자 입력 대기"
+        request_failed = (
+            diagnostics.data["navigation_exception_class"]
+            or diagnostics.data["collection_request_failure_counts"]
+            or diagnostics.data["collection_http_error_counts"]
         )
-
-    async with manual_input_lock:
-        while await page.locator(item_selector).count() == 0:
-            prompt = (
-                f"\n[{site_name}] 열린 Chrome에서 로그인/보안 확인을 완료한 뒤 "
-                "Enter를 누르세요. 이 사이트를 중단하려면 q 입력: "
-            )
-            try:
-                answer = await asyncio.to_thread(input, prompt)
-            except EOFError as exc:
-                raise RuntimeError(
-                    f"[{site_name}] 상품 목록 미표시 및 사용자 입력을 받을 수 없음"
-                ) from exc
-
-            if answer.strip().casefold() == "q":
-                raise RuntimeError(f"[{site_name}] 사용자가 크롤링을 중단했습니다.")
-
-            try:
-                await page.wait_for_selector(
-                    item_selector,
-                    state="attached",
-                    timeout=MANUAL_PRODUCT_WAIT_MS,
-                )
-            except Exception:
-                logger.warning(
-                    f"[{site_name}] 상품 목록이 아직 표시되지 않음 — 다시 입력 대기"
-                )
+        if request_failed and not diagnostics.pause_reason:
+            logger.warning("[%s] 상품 목록 미표시 [network_error] — 후속 스토어 중단", site_name)
+            raise NaverCollectionError("network_error", diagnostics.report_path) from None
+    if await page.locator(item_selector).count() > 0:
+        diagnostics.pause_reason = None
+        return
+    if diagnostics.pause_reason:
+        await _wait_for_operator(page, item_selector, site_name, diagnostics)
+        return
+    logger.warning("[%s] 상품 목록 미표시 [product_list_timeout] — 후속 스토어 중단", site_name)
+    raise NaverCollectionError("product_list_timeout", diagnostics.report_path)
 
 
 async def _is_sold_out_product(item, store_type: str) -> bool:
@@ -121,11 +130,11 @@ async def _is_sold_out_product(item, store_type: str) -> bool:
             }"""
         )
     except Exception as exc:
-        logger.debug(f"품절 여부 확인 실패 (수집 계속): {exc}")
+        logger.debug(f"품절 여부 확인 실패 (수집 계속): {type(exc).__name__}")
         return False
 
 
-async def _scroll_to_bottom(page, item_selector: str) -> int:
+async def _scroll_to_bottom(page, item_selector: str, diagnostics: NaverDiagnostics) -> int:
     """
     페이지를 끝까지 스크롤하며 새 상품이 더 이상 로드되지 않으면 중단합니다.
 
@@ -136,11 +145,13 @@ async def _scroll_to_bottom(page, item_selector: str) -> int:
     no_change_streak = 0
 
     for attempt in range(MAX_SCROLL_ATTEMPTS):
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(SCROLL_PAUSE_MS)
+        await diagnostics.run(page.evaluate("window.scrollTo(0, document.body.scrollHeight)"), "scroll")
+        await diagnostics.run(page.wait_for_timeout(SCROLL_PAUSE_MS), "scroll")
         # 스크롤 후 동적 콘텐츠 로드 대기 (타임아웃 시 무시)
         try:
-            await page.wait_for_load_state("networkidle", timeout=3000)
+            await diagnostics.run(page.wait_for_load_state("networkidle", timeout=3000), "scroll")
+        except CrawlBlockedError:
+            raise
         except Exception:
             pass
 
@@ -230,14 +241,126 @@ async def _extract_product(
         )
 
     except Exception as exc:
-        logger.debug(f"상품 파싱 실패 (건너뜀): {exc}")
+        logger.debug(f"상품 파싱 실패 (건너뜀): {type(exc).__name__}")
         return [], SKIP_REASON_PARSE_ERROR
+
+
+async def _read_cards(page, selectors: dict, store_type: str) -> list[dict]:
+    """한 페이지의 카드 텍스트를 한 번의 조회로 읽는다."""
+    prices = selectors["price"]
+    if isinstance(prices, str):
+        prices = [prices]
+    return await page.evaluate(
+        """(spec) => {
+            const cards = [...document.querySelectorAll(spec.item)];
+            return cards.map((el) => {
+                const lines = (el.innerText || "").split(/\\n+/).map((text) => text.trim()).filter(Boolean);
+                const soldOut = spec.smartStore && (
+                    lines.includes("일시품절")
+                    || [...el.querySelectorAll("*")].some((node) => ((node.innerText || node.textContent || "").trim() === "품절"))
+                );
+                return {
+                    soldOut,
+                    name: (el.querySelector(spec.name)?.innerText || "").trim(),
+                    priceTexts: spec.prices.map((sel) => (el.querySelector(sel)?.innerText || "").trim()),
+                    href: el.querySelector(spec.url)?.getAttribute("href") || "",
+                };
+            });
+        }""",
+        {
+            "item": selectors["item"],
+            "name": selectors["name"],
+            "prices": prices,
+            "url": selectors["url"],
+            "smartStore": store_type == "smart_store",
+        },
+    )
+
+
+def _product_from_card(card: dict, site_name: str, model_strategy: str, crawled_at: str):
+    if card.get("soldOut"):
+        return [], SKIP_REASON_SOLD_OUT
+    product_name = (card.get("name") or "").strip()
+    if not product_name:
+        return [], SKIP_REASON_PARSE_ERROR
+    price = None
+    for price_str in card.get("priceTexts") or []:
+        if not price_str:
+            continue
+        try:
+            price = parse_price(price_str)
+            break
+        except ValueError:
+            continue
+    if price is None:
+        return [], SKIP_REASON_PARSE_ERROR
+    model_names = extract_model_names(product_name, strategy=model_strategy)
+    if not model_names:
+        logger.debug("[%s] 모델명 없음 (건너뜀): %s", site_name, product_name)
+        return [], SKIP_REASON_MODEL_MISSING
+    return (
+        [
+            MarketplaceProduct(
+                site_name=site_name,
+                product_name=product_name,
+                model_name=model_name,
+                price=price,
+                url=clean_url(card.get("href") or ""),
+                crawled_at=crawled_at,
+            )
+            for model_name in model_names
+        ],
+        None,
+    )
+
+
+async def _collect_products(
+    page,
+    selectors: dict,
+    site_name: str,
+    store_type: str,
+    model_strategy: str,
+    crawled_at: str,
+    total_count: int,
+    diagnostics: NaverDiagnostics,
+):
+    """카드 전체를 한 번에 읽고, 실패하면 카드별로 다시 읽는다."""
+    skip_counts = {reason: 0 for reason in SKIP_REASONS}
+    diagnostics.data["skip_counts"] = skip_counts
+    products: list[MarketplaceProduct] = []
+    try:
+        raw_cards = await diagnostics.run(_read_cards(page, selectors, store_type), "parse")
+    except Exception as exc:
+        logger.warning("[%s] 일괄 파싱 실패, 카드별 조회로 진행: %s", site_name, exc)
+        raw_cards = None
+    if raw_cards is not None:
+        for card in raw_cards[:total_count]:
+            extracted, skip_reason = _product_from_card(card, site_name, model_strategy, crawled_at)
+            if extracted:
+                products.extend(extracted)
+            elif skip_reason is not None:
+                skip_counts[skip_reason] += 1
+        diagnostics.data["product_count"] = len(products)
+        return products, skip_counts
+
+    items = page.locator(selectors["item"])
+    for i in range(total_count):
+        extracted, skip_reason = await diagnostics.run(
+            _extract_product(items.nth(i), selectors, site_name, store_type, model_strategy, crawled_at),
+            "parse",
+        )
+        if extracted:
+            products.extend(extracted)
+        elif skip_reason is not None:
+            skip_counts[skip_reason] += 1
+        diagnostics.data["product_count"] = len(products)
+    return products, skip_counts
 
 
 async def _crawl_site(
     context,
     site_info: dict,
-    manual_input_lock: asyncio.Lock,
+    run_id: str | None = None,
 ) -> list[MarketplaceProduct]:
     """
     단일 네이버 사이트(브랜드스토어 or 스마트스토어)를 크롤링합니다.
@@ -245,7 +368,7 @@ async def _crawl_site(
     Args:
         context: Playwright BrowserContext
         site_info: config.SEARCH_URLS의 단일 항목
-        manual_input_lock: 사용자 조치 프롬프트를 직렬화하는 잠금
+        run_id: 동일 실행의 진단 보고서를 연결하는 식별자
 
     Returns:
         수집된 MarketplaceProduct 목록
@@ -263,55 +386,69 @@ async def _crawl_site(
         )
 
     logger.info(
-        f"[{site_name}] 크롤링 시작: {url} "
+        f"[{site_name}] 크롤링 시작: {safe_url(url)} "
         f"(model_strategy={model_strategy})"
     )
 
     selectors = get_selectors(store_type)
     crawled_at = datetime.now().isoformat(timespec="seconds")
 
-    page = await new_stealth_page(context)
+    output_dir = Path(__file__).resolve().parent.parent / config.OUTPUT_DIR
+    diagnostics = NaverDiagnostics(None, site_name, url, selectors["item"], output_dir, run_id)
+    page = None
     try:
-        # 페이지 로드
-        try:
-            await page.goto(url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT)
-        except Exception as exc:
-            logger.warning(f"[{site_name}] 페이지 로드 미완료 — 목록 확인 계속: {exc}")
+        page = await context.new_page()
+        diagnostics.page = page
+        diagnostics.attach()
+        expected_count = None
+        if site_info.get("navigation") == "store_search_ui":
+            expected_count = await navigate_public_search(
+                page, url, diagnostics, PAGE_LOAD_TIMEOUT,
+            )
+            if expected_count == 0:
+                if diagnostics.data["observed_card_count"] != 0:
+                    diagnostics.data["failure_detail"] = "incomplete_search_results"
+                    raise NaverCollectionError("collection_error", diagnostics.report_path)
+                await diagnostics.check("complete")
+                diagnostics.finish("success")
+                return []
+        else:
+            diagnostics.data["entry_mode"] = "direct"
+            # 직접 접속 시에는 navigation 타임아웃 뒤에도 실제 목록을 확인한다.
+            try:
+                await diagnostics.run(
+                    page.goto(url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT), "navigation",
+                )
+            except CrawlBlockedError:
+                raise
+            except Exception as exc:
+                diagnostics.data["navigation_exception_class"] = type(exc).__name__
+                logger.warning(f"[{site_name}] 페이지 로드 미완료 ({type(exc).__name__}) — 목록 확인 계속")
+            await diagnostics.check("navigation")
 
-        # 초기 상품 렌더링 대기. 보안 확인/로그인이 필요하면 사용자 입력을 기다린다.
+        # 개인 계정 로그인 없이 공개 상품만 수집한다.
         await _wait_for_product_list(
             page,
             selectors["item"],
             site_name,
-            manual_input_lock,
+            diagnostics,
         )
 
         # 무한스크롤 처리
-        total_count = await _scroll_to_bottom(page, selectors["item"])
+        total_count = await _scroll_to_bottom(page, selectors["item"], diagnostics)
         logger.info(f"[{site_name}] 스크롤 완료 - 총 상품 카드: {total_count}개")
+        if expected_count is not None:
+            diagnostics.data["observed_card_count"] = total_count
+            if total_count != expected_count:
+                diagnostics.data["failure_detail"] = "incomplete_search_results"
+                raise NaverCollectionError("collection_error", diagnostics.report_path)
 
         if total_count == 0:
             raise RuntimeError(f"[{site_name}] 수집된 상품 카드가 없습니다.")
 
-        # 각 상품 카드 파싱
-        items = page.locator(selectors["item"])
-        products: list[MarketplaceProduct] = []
-        skip_counts = {reason: 0 for reason in SKIP_REASONS}
-
-        for i in range(total_count):
-            item = items.nth(i)
-            extracted, skip_reason = await _extract_product(
-                item,
-                selectors,
-                site_name,
-                store_type,
-                model_strategy,
-                crawled_at,
-            )
-            if extracted:
-                products.extend(extracted)
-            elif skip_reason is not None:
-                skip_counts[skip_reason] += 1
+        products, skip_counts = await _collect_products(
+            page, selectors, site_name, store_type, model_strategy, crawled_at, total_count, diagnostics,
+        )
 
         skip_count = sum(skip_counts.values())
         skip_details = ", ".join(
@@ -322,22 +459,46 @@ async def _crawl_site(
             f"[{site_name}] 파싱 완료 - 성공: {len(products)}개, "
             f"건너뜀: {skip_count}개 ({skip_details})"
         )
+        await diagnostics.check("complete")
+        diagnostics.data["product_count"] = len(products)
+        if skip_counts[SKIP_REASON_PARSE_ERROR]:
+            diagnostics.data["failure_detail"] = "product_parse_error"
+            raise NaverCollectionError("collection_error", diagnostics.report_path)
+        diagnostics.finish("success")
+        logger.info(f"[{site_name}] 비로그인 수집 진단: {diagnostics.report_path}")
         return products
 
+    except NaverAccessError as exc:
+        diagnostics.finish("blocked", exc.reason)
+        raise
+    except NaverCollectionError as exc:
+        diagnostics.finish("failed", exc.reason)
+        raise
+    except Exception as exc:
+        diagnostics.data["exception_class"] = type(exc).__name__
+        diagnostics.data["exception_message"] = str(exc)[:500]
+        logger.error("[%s] 수집 예외: %s", site_name, exc)
+        diagnostics.finish("failed", "collection_error")
+        raise NaverCollectionError("collection_error", diagnostics.report_path) from exc
     finally:
-        await page.close()
+        diagnostics.close()
+        if page is not None:
+            try:
+                await asyncio.wait_for(page.close(), timeout=5)
+            except Exception as exc:
+                logger.warning(f"[{site_name}] 작업 탭 종료 실패 ({type(exc).__name__})")
 
 
 async def crawl_marketplace() -> list[MarketplaceProduct]:
     """
-    config.SEARCH_URLS에 정의된 모든 네이버 사이트를 병렬로 크롤링하여 상품을 수집합니다.
+    config.SEARCH_URLS의 네이버 사이트를 하나씩 열어 상품을 수집합니다.
 
     Returns:
         수집된 MarketplaceProduct 전체 목록.
         config.SEARCH_URLS 가 비어있거나 모든 항목의 url 이 누락이면 [] 반환.
 
     Raises:
-        RuntimeError: 유효한 사이트가 있었으나 모두 크롤링에 실패한 경우
+        RuntimeError: 사이트 접근 제한 또는 수집 실패로 후속 사이트를 중단한 경우
     """
     search_urls = getattr(config, "SEARCH_URLS", None) or []
     if not search_urls:
@@ -365,33 +526,32 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
         logger.info("config.SEARCH_URLS 의 모든 항목에 url 이 없음 — marketplace 크롤링 건너뜀")
         return []
 
-    manual_input_lock = asyncio.Lock()
-    async with create_browser(
-        headless=False,
-        channel="chrome",
-        cookie_file=NAVER_COOKIE_FILE,
-        use_native_fingerprint=True,
-    ) as context:
-        tasks = [
-            _crawl_site(context, site_info, manual_input_lock)
-            for site_info in valid_sites
-        ]
-        gather_results = await asyncio.gather(*tasks, return_exceptions=True)
+    prepared = [(site, load_checkpoint(site)) for site in valid_sites]
+    if all(products is not None for _, products in prepared):
+        logger.info("모든 네이버 스토어의 오늘 완료 결과 재사용 — 브라우저 실행 생략")
+        return [product for _, products in prepared for product in products]
 
+    run_id = uuid4().hex
     all_products: list[MarketplaceProduct] = []
-    failed_sites: list[str] = []
-    for site_info, result in zip(valid_sites, gather_results):
-        if isinstance(result, Exception):
-            logger.error(f"사이트 크롤링 실패 [{site_info['site_name']}]: {result}")
-            failed_sites.append(site_info["site_name"])
-        else:
-            all_products.extend(result)
-
-    if failed_sites:
-        logger.warning(f"실패한 사이트: {failed_sites}")
-
-    if not all_products and len(failed_sites) == len(valid_sites):
-        raise RuntimeError(f"모든 marketplace 사이트 크롤링에 실패했습니다: {failed_sites}")
+    async with create_browser() as context:
+        attempted = False
+        for site_info, cached in prepared:
+            if cached is not None:
+                logger.info(f"[{site_info['site_name']}] 오늘 완료된 상품 {len(cached)}개 재사용")
+                all_products.extend(cached)
+                continue
+            if attempted:
+                await pause(config.SITE_DELAY_MIN_SEC, config.SITE_DELAY_MAX_SEC, "다음 스토어 이동 전 휴식")
+            attempted = True
+            try:
+                products = await _crawl_site(context, site_info, run_id)
+                save_checkpoint(site_info, products)
+                all_products.extend(products)
+            except (CrawlBlockedError, NaverCollectionError):
+                raise
+            except Exception as exc:
+                # 목록 확인 실패 후 다른 스토어로 연속 접근하지 않는다.
+                raise RuntimeError(f"[{site_info['site_name']}] 수집 실패 — 후속 스토어 중단") from exc
 
     logger.info(f"전체 수집 완료 - 총 {len(all_products)}개 상품")
     return all_products

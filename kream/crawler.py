@@ -6,14 +6,15 @@ kream/crawler.py
 - 메인 페이지는 init_kream_page() 에서 1회만 방문 (검색마다 재방문 금지)
 - 페이지를 재사용하여 검색 (create/close 반복 금지)
 - 스크롤·마우스 휠·랜덤 대기로 사람처럼 행동
-- 차단 감지 시 지수 백오프로 최대 MAX_RETRIES회 재시도
+- 차단 또는 검색 실패 시 후속 검색 중단 (자동 재시도 없음)
 """
 import asyncio
 import random
 import time
-from common.browser import new_stealth_page
+from urllib.parse import urlsplit
 from common.logger import get_logger
 from common.models import KreamProduct
+from common.pacing import CrawlBlockedError, check_response
 from kream.parser import (
     KREAM_SELECTORS,
     model_numbers_match,
@@ -30,11 +31,7 @@ logger = get_logger("kream.crawler")
 # ---------------------------------------------------------------------------
 PAGE_LOAD_TIMEOUT  = 60_000      # 페이지 로드 타임아웃 (ms)
 SELECTOR_TIMEOUT   = 15_000      # 셀렉터 대기 타임아웃 (ms)
-DELAY_MIN_SEC      = 8.0         # 검색 간 최소 딜레이 (초)
-DELAY_MAX_SEC      = 15.0        # 검색 간 최대 딜레이 (초)
 MAX_RESULTS        = 5           # 검색 결과에서 최대 처리할 상품 수
-MAX_RETRIES        = 3           # 차단 시 최대 재시도 횟수
-RETRY_BACKOFF_BASE = 30          # 재시도 대기 기본 초 (30 → 60 → 120)
 KREAM_BASE_URL     = "https://kream.co.kr"
 
 # 검색 입력창 폴백 셀렉터 순서 (앞에서부터 시도)
@@ -162,12 +159,27 @@ async def _is_blocked_page(page) -> bool:
         return True
 
 
+def _record_kream_response(page, response) -> None:
+    """검색 SPA의 first-party 문서/API 접근 제한을 기억한다."""
+    host = (urlsplit(response.url).hostname or "").lower()
+    if (host == "kream.co.kr" or host.endswith(".kream.co.kr")) and response.request.resource_type in ("document", "xhr", "fetch"):
+        if response.status in (403, 429):
+            page._kream_blocked_status = response.status
+
+
+def _raise_if_kream_limited(page) -> None:
+    status = getattr(page, "_kream_blocked_status", None)
+    if status in (403, 429):
+        raise CrawlBlockedError(f"Kream 문서/API HTTP {status} — 후속 요청 중단")
+
+
 async def _load_detail_model_number(page, product_url: str) -> str | None:
     """
     Kream 상품 상세 페이지로 이동하여 실제 모델번호를 읽는다.
 
     모델번호 DOM이 없거나 파싱할 수 없으면 오탐 저장을 막기 위해 None을 반환한다.
     """
+    _raise_if_kream_limited(page)
     response = None
     try:
         response = await page.goto(
@@ -182,6 +194,8 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
             f"url={product_url}, error={type(exc).__name__}"
         )
 
+    check_response(response)
+    _raise_if_kream_limited(page)
     if response is not None:
         try:
             model_number = parse_kream_model_number_html(await response.text())
@@ -193,6 +207,8 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
                 f"url={product_url}, error={type(exc).__name__}"
             )
 
+    if await _is_blocked_page(page):
+        raise CrawlBlockedError("Kream 상세 페이지 접근 제한/비정상 응답 — 후속 요청 중단")
     # SSR HTML에서 찾지 못한 경우에만 SPA가 만든 DOM을 폴백으로 확인한다.
     try:
         await page.wait_for_selector(
@@ -265,6 +281,8 @@ async def _find_verified_kream_product(
             )
             return product
 
+        except CrawlBlockedError:
+            raise
         except Exception as exc:
             logger.warning(f"[{model_name}] 후보 검증 실패: {exc} — 건너뜀")
 
@@ -281,22 +299,27 @@ async def _find_verified_kream_product(
 
 async def init_kream_page(context):
     """
-    stealth 페이지를 생성하고 메인 페이지를 1회 방문하여 세션·쿠키를 초기화한다.
+    기존 Chrome 세션에 새 탭을 생성하고 메인 페이지를 1회 방문한다.
     반환된 페이지는 이후 검색에서 재사용한다 (메인 페이지 재방문 없음).
 
     Raises:
         RuntimeError: 페이지 로드 후 chrome 에러 페이지에 있는 경우 (서버 접근 불가)
     """
-    page = await new_stealth_page(context)
+    page = await context.new_page()
+    page._kream_blocked_status = None
+    page.on("response", lambda response: _record_kream_response(page, response))
     logger.info("Kream 메인 페이지 초기화 시작")
 
+    response = None
     try:
-        await page.goto(KREAM_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
+        response = await page.goto(KREAM_BASE_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
     except Exception as exc:
         # kream은 일부 리소스를 4xx로 응답해 Playwright가 navigation 실패로 처리하지만
         # 실제 HTML은 정상 로드되므로 무시하고 계속 진행
         logger.debug(f"Kream 메인 페이지 goto 에러(무시): {type(exc).__name__}")
 
+    check_response(response)
+    _raise_if_kream_limited(page)
     # chrome 에러 페이지 여부 확인 (500 빈 응답 시 chrome-error://chromewebdata/ 로 이동)
     current_url = page.url
     if current_url.startswith("chrome-error://") or current_url.startswith("about:"):
@@ -322,7 +345,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
 
     Returns:
         list[KreamProduct] : 정상 결과 (결과 없음이면 빈 리스트)
-        None               : 차단/검색창 탐지 실패 (재시도 필요)
+        None               : 차단/검색창 탐지 실패 (실행 중단)
     """
     import re as _re
     import pathlib, datetime
@@ -353,6 +376,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
 
     # SPA 렌더링 완료 대기
     await _human_wait(4.0, 7.0)
+    _raise_if_kream_limited(page)
     try:
         _title = await page.title()
     except Exception:
@@ -403,7 +427,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
             f"[{model_name}] 카드 셀렉터 타임아웃 ({time.monotonic()-t0:.1f}s) "
             f"title={page_title!r} body_len={body_len} error={type(exc).__name__}"
         )
-        return []
+        return None
 
     # 카드 데이터를 JS로 한 번에 추출
     cards_data: list[dict] = await page.evaluate("""() => {
@@ -438,43 +462,25 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
 
 
 # ---------------------------------------------------------------------------
-# 공개 API (재시도 래퍼)
+# 공개 API (순차 검색·중단)
 # ---------------------------------------------------------------------------
 
 async def search_kream(model_name: str, page) -> list[KreamProduct]:
-    """
-    재사용 페이지로 Kream을 검색. 차단 시 지수 백오프로 최대 MAX_RETRIES회 재시도.
-    재시도 시 새 창을 생성하지 않고 기존 페이지를 Kream 홈으로 재이동하여 세션을 초기화한다.
+    """추가 휴식 없이 한 번만 시도한다. 비정상 결과는 후속 요청을 중단한다."""
+    _raise_if_kream_limited(page)
+    result = await _search_kream_once(model_name, page)
+    if result is None:
+        raise CrawlBlockedError(f"[{model_name}] 차단 또는 검색 입력 실패 — 자동 재시도 없이 중단")
+    return result
 
-    Args:
-        model_name: 검색할 모델명
-        page:       init_kream_page()로 초기화된 Playwright Page (재사용)
-    """
-    for attempt in range(MAX_RETRIES + 1):
-        result = await _search_kream_once(model_name, page)
-        if result is not None:
-            return result
-        if attempt < MAX_RETRIES:
-            wait_time = RETRY_BACKOFF_BASE * (2 ** attempt)  # 30, 60, 120초
-            logger.warning(
-                f"[{model_name}] 차단 감지 — {wait_time}초 후 재시도 "
-                f"({attempt + 1}/{MAX_RETRIES})"
-            )
-            await asyncio.sleep(wait_time)
-            # 새 창 대신 기존 페이지를 홈으로 재이동하여 세션 초기화
-            try:
-                logger.info(f"[{model_name}] 차단 우회 — Kream 홈으로 재이동")
-                await page.goto(
-                    KREAM_BASE_URL,
-                    wait_until="domcontentloaded",
-                    timeout=PAGE_LOAD_TIMEOUT,
-                )
-                await _human_wait(2.0, 4.0)
-            except Exception as exc:
-                logger.warning(f"[{model_name}] 홈 재이동 실패: {exc}")
-        else:
-            logger.error(f"[{model_name}] 최대 재시도 횟수 초과 — 건너뜀")
-    return []
+
+async def iter_kream_results(model_names: list[str], context):
+    """탭 하나를 재사용해 추가 휴식 없이 순차 검색한다."""
+    if not model_names:
+        return
+    page = await init_kream_page(context)
+    for model_name in model_names:
+        yield model_name, await search_kream(model_name, page)
 
 
 # ---------------------------------------------------------------------------
@@ -504,15 +510,12 @@ if __name__ == "__main__":
 
         print(f"검색할 모델명: {len(unique_models)}개")
 
-        async with create_browser(headless=False) as context:
-            page = await init_kream_page(context)
-            for mn in unique_models:
-                results = await search_kream(mn, page)
+        async with create_browser() as context:
+            async for mn, results in iter_kream_results(unique_models, context):
                 for p in results:
                     print(
                         f"  [{p.model_name}] {p.kream_name} | "
                         f"가격={p.kream_price:,}원 | 거래량={p.trade_count}"
                     )
-                await _human_wait(DELAY_MIN_SEC, DELAY_MAX_SEC)
 
     asyncio.run(_main())

@@ -3,9 +3,9 @@
 ```bash
 # 의존성 설치 (최초 1회)
 pip install -r requirements.txt
-playwright install chromium
 
-# Chrome CDP 실행 (나이키·아디다스·special 크롤러 필수 — 별도 터미널)
+# ego lite를 설치해 둔다. 실행하면 독립 창이 자동으로 열린다.
+# 선택적 연결 점검 (별도 터미널 불필요)
 python chrome.py
 
 # 파이프라인 실행
@@ -73,7 +73,7 @@ Codex mcp add playwright npx @playwright/mcp@latest
 설치 후 `/mcp` 로 connected 상태 확인.
 
 ### 세션 공유 원칙
-- MCP 브라우저와 크롤러는 `chrome.py` 세션(포트 9222)을 **순차 공유**한다 (동시 사용 금지 — 포트 충돌·세션 오염).
+- 검증 브라우저도 확장 없이 독립 실행한다. 크롤러 종료 후 순차 검증하며 기존 Chrome 로그인은 공유하지 않는다.
 - 검증은 크롤러 실행이 **종료된 후** 시작한다.
 - 쿠키·fingerprint 오염을 줄이기 위해 **수정된 크롤러만** 대상으로 검증한다 (전체 사이트 일괄 검증 금지).
 

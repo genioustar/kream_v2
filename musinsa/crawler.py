@@ -34,7 +34,7 @@ RANKING_API_URL      = "https://client.musinsa.com/api/home/web/v5/pans/ranking"
 DEFAULT_PAGE_SIZE    = 100
 MAX_RANKING_PAGES    = 20
 REQUEST_TIMEOUT_SEC  = 20
-REQUEST_DELAY_SEC    = 0.2
+REQUEST_DELAY_SEC    = 3.0
 USER_AGENT           = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

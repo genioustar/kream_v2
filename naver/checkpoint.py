@@ -12,11 +12,14 @@ from common.models import MarketplaceProduct
 
 logger = get_logger("naver.checkpoint")
 
+# 상품 URL 생성 규칙 등 저장 형식이 바뀌면 올린다. 과거 값은 1이었고, 2로 올린 이유는 history.md에 있다.
+CHECKPOINT_VERSION = 2
+
 
 def _checkpoint_path(site_info: dict) -> Path:
     # URL의 검색 조건까지 키에 반영하되 원문/쿼리는 메타데이터에 보관하지 않는다.
     identity = {
-        "version": 1,
+        "version": CHECKPOINT_VERSION,
         "site_name": site_info["site_name"],
         "url": site_info["url"].strip(),
         "type": site_info.get("type", "smart_store"),
@@ -34,7 +37,7 @@ def load_checkpoint(site_info: dict) -> list[MarketplaceProduct] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("version") != 1 or data.get("status") != "complete":
+        if data.get("version") != CHECKPOINT_VERSION or data.get("status") != "complete":
             raise ValueError("incomplete checkpoint")
         records = data["products"]
         if not isinstance(records, list):
@@ -61,7 +64,7 @@ def save_checkpoint(site_info: dict, products: list[MarketplaceProduct]) -> Path
     """스토어가 정상 종료한 결과를 원자적으로 저장한다. 최종 상품 파일과 분리한다."""
     path = _checkpoint_path(site_info)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"version": 1, "status": "complete", "products": [asdict(product) for product in products]}
+    data = {"version": CHECKPOINT_VERSION, "status": "complete", "products": [asdict(product) for product in products]}
     temporary = None
     try:
         with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as handle:

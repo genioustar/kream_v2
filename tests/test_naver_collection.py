@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlsplit
 
 import config
 from naver.crawler import (
@@ -14,6 +15,52 @@ from naver.crawler import (
 )
 from naver.diagnostics import NaverAccessError, NaverCollectionError, NaverDiagnostics
 from naver.parser import get_selectors
+
+
+PRODUCT_NAME = "테스트 상품 (ABC12345)"
+PRODUCT_PRICE_TEXT = "100,000원"
+FORBIDDEN_PRODUCT_HOST = "www.naver.com"
+SMARTSTORE_PAGE_URL = "https://smartstore.naver.com/aint/best"
+BRAND_PAGE_URL = "https://brand.naver.com/set-of/category/d03e90228e4f49af9e01eb5eb0907ad2"
+SMARTSTORE_PRODUCT_PATH = "/aint/products/1001"
+BRAND_PRODUCT_PATH = "/set-of/products/2002"
+SMARTSTORE_PRODUCT_URL = "https://smartstore.naver.com/aint/products/1001"
+BRAND_PRODUCT_URL = "https://brand.naver.com/set-of/products/2002"
+DECOY_SMARTSTORE_PRODUCT_URL = "https://www.naver.com/aint/products/1001"
+DECOY_BRAND_PRODUCT_URL = "https://www.naver.com/set-of/products/2002"
+STORE_ORIGIN_CASES = (
+    (SMARTSTORE_PAGE_URL, SMARTSTORE_PRODUCT_PATH, SMARTSTORE_PRODUCT_URL, DECOY_SMARTSTORE_PRODUCT_URL),
+    (BRAND_PAGE_URL, BRAND_PRODUCT_PATH, BRAND_PRODUCT_URL, DECOY_BRAND_PRODUCT_URL),
+)
+
+
+def product_locator(selectors, href):
+    """카드별 조회가 읽는 Locator. href는 호출자가 준 값 그대로 반환한다."""
+    item = MagicMock()
+    item.evaluate = AsyncMock(return_value=False)
+    name = MagicMock()
+    name.first.inner_text = AsyncMock(return_value=PRODUCT_NAME)
+    price = MagicMock()
+    price.first.inner_text = AsyncMock(return_value=PRODUCT_PRICE_TEXT)
+    url = MagicMock()
+    url.first.get_attribute = AsyncMock(return_value=href)
+
+    def locate(selector):
+        if selector == selectors["name"]:
+            return name
+        if selector == selectors["url"]:
+            return url
+        if selector in selectors["price"]:
+            return price
+        raise AssertionError(f"Unexpected item selector: {selector}")
+
+    item.locator.side_effect = locate
+    return item
+
+
+def assert_store_product_url(test, products, expected):
+    test.assertEqual([product.url for product in products], [expected])
+    test.assertNotEqual(urlsplit(products[0].url).hostname, FORBIDDEN_PRODUCT_HOST)
 
 
 class NaverCollectionTests(unittest.IsolatedAsyncioTestCase):
@@ -208,6 +255,78 @@ class NaverCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["failure_detail"], "incomplete_search_results")
         self.assertEqual(report["observed_card_count"], 1)
         self.assert_closed()
+
+    async def test_card_path_product_url_uses_store_page_origin(self):
+        for page_url, product_path, expected, _decoy in STORE_ORIGIN_CASES:
+            with self.subTest(page_url=page_url):
+                self.page.url = page_url
+                self.prepare_items([product_locator(self.selectors, product_path)])
+                site = {**self.site, "url": page_url}
+                products = await _crawl_site(self.context, site)
+                assert_store_product_url(self, products, expected)
+
+
+class NaverBulkProductUrlTests(unittest.IsolatedAsyncioTestCase):
+    """일괄 카드 읽기가 성공하는 별도 fixture. 기존 클래스의 실패 fixture는 바꾸지 않는다."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.output_dir = Path(directory.name)
+        output_patch = patch.object(config, "OUTPUT_DIR", directory.name)
+        output_patch.start()
+        self.addCleanup(output_patch.stop)
+
+        self.site = {
+            "site_name": "collection-test",
+            "url": "https://smartstore.naver.com/collection-test/best",
+            "type": "smart_store",
+            "model_strategy": "bracket_first",
+        }
+        self.selectors = get_selectors(self.site["type"])
+        self.cards = []
+        self.page = MagicMock()
+        self.page.url = self.site["url"]
+        self.page.goto = AsyncMock(return_value=None)
+        self.page.wait_for_selector = AsyncMock(return_value=None)
+        self.page.close = AsyncMock()
+        self.page.context.cookies = AsyncMock(return_value=[])
+
+        def evaluate(*args, **kwargs):
+            spec = args[1] if len(args) > 1 else kwargs.get("arg")
+            if isinstance(spec, dict) and "item" in spec and "prices" in spec:
+                return self.cards
+            return {
+                "protection_present": False,
+                "login_present": False,
+                "challenge_present": False,
+            }
+
+        self.page.evaluate = AsyncMock(side_effect=evaluate)
+        self.context = MagicMock(new_page=AsyncMock(return_value=self.page))
+
+    def prepare_items(self, items):
+        locator = self.page.locator.return_value
+        locator.count = AsyncMock(return_value=len(items))
+        locator.nth.side_effect = items.__getitem__
+        scroll_patch = patch("naver.crawler._scroll_to_bottom", new=AsyncMock(return_value=len(items)))
+        scroll_patch.start()
+        self.addCleanup(scroll_patch.stop)
+
+    async def test_bulk_read_product_url_uses_store_page_origin(self):
+        for page_url, product_path, expected, decoy in STORE_ORIGIN_CASES:
+            with self.subTest(page_url=page_url):
+                self.page.url = page_url
+                self.cards = [{
+                    "soldOut": False,
+                    "name": PRODUCT_NAME,
+                    "priceTexts": [PRODUCT_PRICE_TEXT],
+                    "href": product_path,
+                }]
+                self.prepare_items([product_locator(self.selectors, decoy)])
+                site = {**self.site, "url": page_url}
+                products = await _crawl_site(self.context, site)
+                assert_store_product_url(self, products, expected)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import re
 from typing import Optional
+from urllib.parse import urlsplit
 
 
 # ---------------------------------------------------------------------------
@@ -83,8 +84,16 @@ def parse_price(price_str: str) -> int:
 # 편의 함수
 # ---------------------------------------------------------------------------
 
-def clean_url(raw_url: Optional[str], base: str = "https://www.naver.com") -> Optional[str]:
-    """상대 URL을 절대 URL로 변환합니다."""
+def page_origin(page_url: str) -> str:
+    """페이지 URL의 scheme과 호스트를 반환한다. 둘 중 하나라도 없으면 원문을 반환한다."""
+    parts = urlsplit(page_url)
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return page_url
+
+
+def clean_url(raw_url: Optional[str], base: str) -> Optional[str]:
+    """상대 URL을 base 기준 절대 URL로 변환한다. base는 필수다."""
     if not raw_url:
         return None
     if raw_url.startswith("http"):

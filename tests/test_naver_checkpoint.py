@@ -1,5 +1,7 @@
+import json
 import tempfile
 import unittest
+from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import config
 from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError
-from naver.checkpoint import load_checkpoint, save_checkpoint
+from naver.checkpoint import CHECKPOINT_VERSION, _checkpoint_path, load_checkpoint, save_checkpoint
 from naver.crawler import crawl_marketplace
 
 
@@ -37,14 +39,41 @@ class NaverCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
     def test_corrupt_incomplete_and_old_data_are_not_reused(self):
-        for content in ('{', '[]', '{"version":1,"status":"in_progress","products":[]}',
-                        '{"version":1,"status":"complete","products":[{}]}'):
+        incomplete = json.dumps(
+            {"version": CHECKPOINT_VERSION, "status": "in_progress", "products": []},
+            separators=(",", ":"),
+        )
+        invalid_schema = json.dumps(
+            {"version": CHECKPOINT_VERSION, "status": "complete", "products": [{}]},
+            separators=(",", ":"),
+        )
+        for content in ("{", "[]", incomplete, invalid_schema):
             path = save_checkpoint(self.site, [self.product])
             path.write_text(content)
             self.assertIsNone(load_checkpoint(self.site))
         self.product.crawled_at = (date.today() - timedelta(days=1)).isoformat() + "T09:00:00"
         save_checkpoint(self.site, [self.product])
         self.assertIsNone(load_checkpoint(self.site))
+
+    def test_previous_version_file_at_current_path_is_rejected(self):
+        path = _checkpoint_path(self.site)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": 1, "status": "complete", "products": [asdict(self.product)]}
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        self.assertIsNone(load_checkpoint(self.site))
+
+    def test_save_then_load_keeps_product_and_current_version(self):
+        path = save_checkpoint(self.site, [self.product])
+        self.assertEqual(load_checkpoint(self.site), [self.product])
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["version"], CHECKPOINT_VERSION)
+
+    def test_version_is_part_of_checkpoint_path(self):
+        """버전이 경로 해시에 들어가야 이전 형식의 파일이 아예 조회되지 않는다."""
+        current = _checkpoint_path(self.site)
+        with patch("naver.checkpoint.CHECKPOINT_VERSION", CHECKPOINT_VERSION - 1):
+            previous = _checkpoint_path(self.site)
+        self.assertNotEqual(current, previous)
 
     def test_empty_success_is_distinct_from_cache_miss(self):
         save_checkpoint(self.site, [])

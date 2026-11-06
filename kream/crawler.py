@@ -144,19 +144,32 @@ async def _open_search_and_get_input(page):
 # ---------------------------------------------------------------------------
 
 async def _is_blocked_page(page) -> bool:
-    """Kream 차단/에러 페이지 여부를 감지한다."""
+    """Kream 차단 문구가 있는 페이지만 차단으로 본다.
+
+    본문을 읽지 못하거나 길이가 짧은 경우는 이동 중 화면일 수 있어
+    전체 검색을 끊지 않는다. 호출한 쪽에서 모델번호 확인을 이어간다.
+    """
     try:
         content = await page.content()
-        if len(content) < 500:
-            return True
-        blocked_texts = ["잠시 후 다시 시도", "잠시후 다시 시도", "too many requests", "rate limit"]
-        content_lower = content.lower()
-        for text in blocked_texts:
-            if text.lower() in content_lower:
-                return True
+    except Exception as exc:
+        logger.warning(
+            "Kream 페이지 본문을 읽지 못했습니다: url=%s error=%s",
+            getattr(page, "url", ""),
+            type(exc).__name__,
+        )
         return False
-    except Exception:
-        return True
+    content_lower = content.lower()
+    blocked_texts = ["잠시 후 다시 시도", "잠시후 다시 시도", "too many requests", "rate limit"]
+    for text in blocked_texts:
+        if text.lower() in content_lower:
+            return True
+    if len(content) < 500:
+        logger.warning(
+            "Kream 페이지 본문이 짧아 모델 확인으로 넘깁니다: url=%s len=%s",
+            getattr(page, "url", ""),
+            len(content),
+        )
+    return False
 
 
 def _record_kream_response(page, response) -> None:

@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-06 — Kream 상세의 짧은 화면은 전체 검색을 끊지 않음
+
+- [Kream] 상세 본문을 읽지 못하거나 500자 미만이어도 차단으로 보지 않는다. `잠시 후 다시 시도` 같은 차단 문구와 HTTP 403/429만 이후 검색을 멈춘다.
+  - SUPERSEDED: 본문 읽기 실패와 짧은 HTML을 접근 제한으로 보고 청크를 중단 — 상품 페이지로 넘어가는 순간에 한 번 실패해도 남은 모델 검색이 같이 끊겼다.
+
 ## 2026-11-05 — Kream 차익 결과에 직전 날짜 대비 표시 추가
 
 - [Kream] `kream/history_marker.py` 신설. 저장 시 오늘 이전 가장 최신 `output/YYYYMMDD/arbitrage_results.json`과 `(model_name, marketplace_site)` 키로 비교해 `previously_saved`, `price_status`(new/same/changed), changed일 때 `previous_marketplace_price`를 항목에 추가한다. `marketplace_price`만 비교하며 이전 파일은 청크 루프 전 1회만 읽는다. 같은 키의 여러 가격은 집합으로 보관해 오늘 가격이 집합에 있으면 same, 없으면 changed(이전 가격은 차이가 가장 작은 값, 동률이면 더 작은 값)로 판정한다. 이전 파일 없음은 전부 신규, JSON 오류·최상위 list 아님은 warning 후 전부 신규, 손상 레코드(dict 아님·키 누락·model_name/marketplace_site 비문자열·가격 None/bool/쉼표 문자열/비정수 float/Infinity/NaN)는 해당 건만 건너뛰고 건수를 warning으로 남긴다. 정수형 float(100.0)과 숫자 문자열("129000")은 허용한다.

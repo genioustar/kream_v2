@@ -276,7 +276,7 @@ resell-sniper/
 - `_load_detail_model_number(page, product_url)` — Playwright 세션으로 후보 상세 URL을 열고 서버 응답 HTML의 `모델번호` 문단을 우선 파싱한 뒤, 없으면 반응형 중복 요소 중 첫 hidden 노드에 막히지 않도록 `attached` DOM 전체 텍스트로 폴백한다. 두 경로 모두 실패하면 `None`을 반환해 fail-closed 처리
 - `_find_verified_kream_product(model_name, cards_data, page)` — 검색 결과 상위 `MAX_RESULTS=5`개 상세를 순서대로 확인하고 실제 모델번호가 검색어와 완전 일치하는 첫 상품만 반환
 - 검색 결과 수로 정확도를 추정하지 않는다. 상세 모델번호 검증을 통과하지 못한 후보는 KreamProduct와 차익 결과에 저장하지 않는다.
-- 상세 이동 전 추가 휴식과 자동 재시도 없음. 차단 페이지 감지는 기존 휴리스틱을 사용하므로 사이트 응답 변화 시 추가 점검이 필요하다.
+- 상세 이동 전 추가 휴식과 자동 재시도 없음. 차단은 HTTP 403/429와 차단 문구로만 판단한다. 본문을 읽지 못하거나 짧은 화면은 그 상품의 모델번호 확인으로 넘긴다.
 
 ### kream/parser.py
 - `KREAM_SELECTORS` — 검색 카드와 상세 `모델번호` 문단 셀렉터

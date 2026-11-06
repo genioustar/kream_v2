@@ -1,5 +1,11 @@
 # 변경 히스토리
 
+## 2026-11-06 — 세일 URL 비활성 설정 정리와 테스트 기준선 복구
+
+- [설정] 나이키·아디다스·special 세일 URL을 빈 문자열로 정의해 비활성으로 유지하고, 세 크롤러는 `config.X_SALE_URL`을 직접 읽는다. 세일이 열리면 값만 채워 다시 켠다. 테스트 기준선(106개 전체 통과)을 복구하는 과정에서 정해졌다.
+  - SUPERSEDED: 세일 URL을 주석 처리해 속성 자체를 없애고 크롤러가 `getattr` 기본값으로 읽던 방식 — 속성이 없으면 테스트가 `AttributeError`로 깨지고 설정 존재 여부가 코드에서 드러나지 않아, 빈 문자열 정의와 직접 접근으로 되돌림
+- [테스트] 아디다스 HTTP 테스트는 테스트 URL을 주입하고, 네이버 수집 테스트는 일괄 카드 읽기가 실패하면 카드별 조회로 가도록 fixture를 맞춘다. 일괄 읽기 성공 경로를 검증하는 테스트는 아직 없다.
+
 ## 2026-11-05 — Kream 차익 결과에 직전 날짜 대비 표시 추가
 
 - [Kream] `kream/history_marker.py` 신설. 저장 시 오늘 이전 가장 최신 `output/YYYYMMDD/arbitrage_results.json`과 `(model_name, marketplace_site)` 키로 비교해 `previously_saved`, `price_status`(new/same/changed), changed일 때 `previous_marketplace_price`를 항목에 추가한다. `marketplace_price`만 비교하며 이전 파일은 청크 루프 전 1회만 읽는다. 같은 키의 여러 가격은 집합으로 보관해 오늘 가격이 집합에 있으면 same, 없으면 changed(이전 가격은 차이가 가장 작은 값, 동률이면 더 작은 값)로 판정한다. 이전 파일 없음은 전부 신규, JSON 오류·최상위 list 아님은 warning 후 전부 신규, 손상 레코드(dict 아님·키 누락·model_name/marketplace_site 비문자열·가격 None/bool/쉼표 문자열/비정수 float/Infinity/NaN)는 해당 건만 건너뛰고 건수를 warning으로 남긴다. 정수형 float(100.0)과 숫자 문자열("129000")은 허용한다.

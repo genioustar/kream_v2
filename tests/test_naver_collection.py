@@ -38,11 +38,18 @@ class NaverCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.page.wait_for_selector = AsyncMock(return_value=None)
         self.page.close = AsyncMock()
         self.page.context.cookies = AsyncMock(return_value=[])
-        self.page.evaluate = AsyncMock(return_value={
-            "protection_present": False,
-            "login_present": False,
-            "challenge_present": False,
-        })
+
+        def evaluate(*args, **kwargs):
+            spec = args[1] if len(args) > 1 else kwargs.get("arg")
+            if isinstance(spec, dict) and "item" in spec and "prices" in spec:
+                raise RuntimeError("bulk card read failed")
+            return {
+                "protection_present": False,
+                "login_present": False,
+                "challenge_present": False,
+            }
+
+        self.page.evaluate = AsyncMock(side_effect=evaluate)
         self.context = MagicMock(new_page=AsyncMock(return_value=self.page))
 
     def item(self, *, sold_out=False, model_missing=False, failed_field=None):

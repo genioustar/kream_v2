@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from adidas import crawler
 from common.pacing import CrawlBlockedError
 
+ADIDAS_TEST_SALE_URL = 'https://www.adidas.co.kr/outlet?grid=true'
+
 
 def response(status, url='https://www.adidas.co.kr/big_discount', kind='document', headers=None):
     return MagicMock(status=status, url=url, headers=headers or {},
@@ -95,7 +97,8 @@ class AdidasHttpTests(unittest.IsolatedAsyncioTestCase):
         @asynccontextmanager
         async def browser():
             yield MagicMock(new_page=AsyncMock(return_value=page))
-        with patch.object(crawler, 'create_browser', browser), \
+        with patch.object(crawler.config, 'ADIDAS_SALE_URL', ADIDAS_TEST_SALE_URL), \
+             patch.object(crawler, 'create_browser', browser), \
              patch.object(crawler._ResponseDiagnostics, 'save', new_callable=AsyncMock) as save, \
              patch.object(crawler, '_find_card_selector', new_callable=AsyncMock) as find:
             with self.assertRaisesRegex(RuntimeError, 'HTTP 404'):
@@ -105,26 +108,27 @@ class AdidasHttpTests(unittest.IsolatedAsyncioTestCase):
             page.close.assert_awaited_once()
 
     async def test_disabled_next_finishes_and_same_page_fails(self):
-        page = MagicMock(url=crawler.config.ADIDAS_SALE_URL, title=AsyncMock(return_value='sale'),
-                         evaluate=AsyncMock(), close=AsyncMock(), is_closed=MagicMock(return_value=False))
-        cards = MagicMock(evaluate_all=AsyncMock(return_value=['product.html']))
-        button = MagicMock(is_visible=AsyncMock(return_value=True), is_disabled=AsyncMock(return_value=True), click=AsyncMock())
-        page.locator.side_effect = lambda sel: MagicMock(first=button) if sel == crawler.NEXT_BTN_SELECTOR else cards
-        @asynccontextmanager
-        async def browser():
-            yield MagicMock(new_page=AsyncMock(return_value=page))
-        with patch.object(crawler, 'create_browser', browser), \
-             patch.object(crawler, '_navigate', new_callable=AsyncMock), \
-             patch.object(crawler, '_find_card_selector', AsyncMock(return_value='cards')), \
-             patch.object(crawler, '_extract_products', AsyncMock(return_value=[])), \
-             patch.object(crawler.asyncio, 'sleep', new_callable=AsyncMock), \
-             patch.object(crawler._ResponseDiagnostics, 'save', new_callable=AsyncMock):
-            self.assertEqual(await crawler.crawl_adidas(), [])
-            button.click.assert_not_awaited()
-            button.is_disabled.return_value = False
-            with self.assertRaisesRegex(RuntimeError, '진행되지'):
-                await crawler.crawl_adidas()
-            button.click.assert_awaited_once()
+        with patch.object(crawler.config, 'ADIDAS_SALE_URL', ADIDAS_TEST_SALE_URL):
+            page = MagicMock(url=crawler.config.ADIDAS_SALE_URL, title=AsyncMock(return_value='sale'),
+                             evaluate=AsyncMock(), close=AsyncMock(), is_closed=MagicMock(return_value=False))
+            cards = MagicMock(evaluate_all=AsyncMock(return_value=['product.html']))
+            button = MagicMock(is_visible=AsyncMock(return_value=True), is_disabled=AsyncMock(return_value=True), click=AsyncMock())
+            page.locator.side_effect = lambda sel: MagicMock(first=button) if sel == crawler.NEXT_BTN_SELECTOR else cards
+            @asynccontextmanager
+            async def browser():
+                yield MagicMock(new_page=AsyncMock(return_value=page))
+            with patch.object(crawler, 'create_browser', browser), \
+                 patch.object(crawler, '_navigate', new_callable=AsyncMock), \
+                 patch.object(crawler, '_find_card_selector', AsyncMock(return_value='cards')), \
+                 patch.object(crawler, '_extract_products', AsyncMock(return_value=[])), \
+                 patch.object(crawler.asyncio, 'sleep', new_callable=AsyncMock), \
+                 patch.object(crawler._ResponseDiagnostics, 'save', new_callable=AsyncMock):
+                self.assertEqual(await crawler.crawl_adidas(), [])
+                button.click.assert_not_awaited()
+                button.is_disabled.return_value = False
+                with self.assertRaisesRegex(RuntimeError, '진행되지'):
+                    await crawler.crawl_adidas()
+                button.click.assert_awaited_once()
 
 
 if __name__ == '__main__':

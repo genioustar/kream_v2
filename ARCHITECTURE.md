@@ -29,7 +29,7 @@ main.py --mode full (기본)
   │     ├── nike/crawler.py    → output/YYYYMMDD/nike_products.json
   │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     └── special/crawler.py → output/YYYYMMDD/special_products.json
-  │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (미설정 시 스킵)
+  │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (빈 문자열이면 비활성, 스킵)
   │     * 오늘자 파일이 이미 있으면 스킵
   │
   ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
@@ -176,7 +176,7 @@ resell-sniper/
 - `check_connection()` — Task Space 에서 `about:blank` 를 열고 `navigator.webdriver === true` 가 아닌지 확인한 뒤 그 Space 를 닫는다.
 
 ### nike/crawler.py
-- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **독립 Chrome 창 실행** (`create_browser()`). URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **독립 Chrome 창 실행** (`create_browser()`). URL 출처: `config.NIKE_SALE_URL` 직접 읽기. 빈 문자열이면 비활성, 즉시 [] 반환. redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_collect_via_api(page, target_count=100)` — 스크롤로 Nike JS가 `product_wall` API 호출을 유도하고 `page.on("response", ...)` 로 JSON 응답을 인터셉트해 수집. scrollY 변화 없음 NO_CHANGE_LIMIT(6)회 연속이면 종료
 - `_parse_api_product(item, crawled_at)` — API 응답 항목을 `MarketplaceProduct` 로 변환. 필드: `copy.title`, `copy.subTitle`, `prices.currentPrice`, `pdpUrl.url`, `productCode`
 - `_extract_model_name(card_text, href)` — `_parse_api_product` 내 폴백. 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 3순위
@@ -184,7 +184,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
 
 ### special/crawler.py
-- `crawl_special()` — `config.SPECIAL_SALE_URL` 페이지를 JS 휴리스틱으로 크롤링. **독립 Chrome 창 실행** (`create_browser()`). 미설정/빈 값이면 즉시 [] 반환. Chrome 실행 실패 시 오류를 전달한다.
+- `crawl_special()` — `config.SPECIAL_SALE_URL` 을 직접 읽어 JS 휴리스틱으로 크롤링. **독립 Chrome 창 실행** (`create_browser()`). 빈 문자열이면 비활성, 즉시 [] 반환. Chrome 실행 실패 시 오류를 전달한다.
 - `SPECIAL_MODEL_STRATEGY`가 지원 목록에 없으면 브라우저 연결 전에 `ValueError`로 설정 오류를 알린다.
 - `_JS_EXTRACT` — 3단계 휴리스틱으로 상품 카드 자동 탐지하는 JS 문자열
   - 전략 1: `<li>` 요소 중 img + a[href] + 가격패턴 모두 포함한 것
@@ -212,7 +212,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### adidas/crawler.py
-- `crawl_adidas()` — `ADIDAS_SALE_URL`의 세일 목록을 독립 Chrome에서 수집한다. 미설정이면 `[]`, 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
+- `crawl_adidas()` — `config.ADIDAS_SALE_URL` 을 직접 읽어 세일 목록을 독립 Chrome에서 수집한다. 빈 문자열이면 비활성(`[]`), 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
 - `_navigate(page, sale_url, diagnostics)` — 문서 응답 상태를 확인한다. 문서 429만 최대 2회 재시도하며 `_retry_delay(retry_after, attempt)`로 Retry-After 초/HTTP-date 또는 5·10초 대기를 적용한다. 서버 지정 대기가 `MAX_RETRY_WAIT_SEC=60`을 초과하면 일찍 재시도하지 않고 중단한다. `MAX_RATE_LIMIT_RETRIES=2`.
 - `_raise_http_error(status, url, retry_after)` — 상태별 안내를 포함한 예외. 403과 재시도 불가/소진 429는 `CrawlBlockedError`로 파이프라인에도 전파한다.
 - `_ResponseDiagnostics` — `on_response()`로 문서 상태와 document/XHR/fetch HTTP 오류를 기록한다. `check()`는 메인 문서 및 adidas.co.kr 하위 호스트의 `/api/` 상품·PLP·검색 경로 실패를 전달한다. 실측한 개별 상품 보조 경로 `/plp-app/api/product/{code}`와 장바구니·분석 요청은 진단 전용이며 목록 DOM으로 수집한다. `save(error)`는 실패 시 `output/YYYYMMDD/diagnostics/adidas_HHMMSS_ffffff.json`과 화면 PNG를 남긴다. URL·상태·Retry-After·본문 일부만 저장하며 쿠키/인증 헤더는 저장하지 않는다. 닫힌 페이지에서도 가능한 JSON 진단을 유지한다.
@@ -318,10 +318,10 @@ resell-sniper/
 
 
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
-| `NIKE_SALE_URL` | 미설정 (주석 예시만 존재) | 나이키 성인 세일 신발 URL (빈 값/미설정 시 나이키 크롤링 스킵) |
-| `ADIDAS_SALE_URL` | https://www.adidas.co.kr/outlet?grid=true | 아디다스 세일 목록 URL. 공식 아울렛 전체보기(grid=true 필수). 의류·신발·용품 포함, Kids 제외 (빈 값/미설정 시 스킵) |
+| `NIKE_SALE_URL` | `""` | 나이키 성인 세일 신발 URL. 빈 문자열이면 비활성, 크롤러는 `config.NIKE_SALE_URL` 을 직접 읽음. 예시: `https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok` |
+| `ADIDAS_SALE_URL` | `""` | 아디다스 세일 목록 URL. 빈 문자열이면 비활성, 크롤러는 `config.ADIDAS_SALE_URL` 을 직접 읽음. 예시: `https://www.adidas.co.kr/outlet?grid=true` (공식 아울렛 전체보기, grid=true 필수). 의류·신발·용품 포함, Kids 제외 |
 | `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원 |
-| `SPECIAL_SALE_URL` | 미설정 (주석 예시만 존재) | 범용 적응형 크롤러 대상 URL (빈 값/미설정 시 special 크롤링 스킵) |
+| `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |
 | `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 30%, musinsa 0%, nike 0%, special 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
 

@@ -239,7 +239,7 @@ async def crawl_nike() -> list[MarketplaceProduct]:
         site_name='nike' 인 MarketplaceProduct 리스트. 빈 결과 시 [] 반환.
         config.NIKE_SALE_URL 미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
     """
-    sale_url = getattr(config, "NIKE_SALE_URL", "") or ""
+    sale_url = config.NIKE_SALE_URL
     if not sale_url.strip():
         logger.info("config.NIKE_SALE_URL 미설정 — 나이키 크롤링 건너뜀")
         return []

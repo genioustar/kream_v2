@@ -5,6 +5,22 @@
 - [Kream] 상세 본문을 읽지 못하거나 500자 미만이어도 차단으로 보지 않는다. `잠시 후 다시 시도` 같은 차단 문구와 HTTP 403/429만 이후 검색을 멈춘다.
   - SUPERSEDED: 본문 읽기 실패와 짧은 HTML을 접근 제한으로 보고 청크를 중단 — 상품 페이지로 넘어가는 순간에 한 번 실패해도 남은 모델 검색이 같이 끊겼다.
 
+## 2026-11-06 — 네이버 상품 URL을 스토어 origin 기준으로 생성
+
+- [네이버 URL] 상대 경로 상품 URL이 `clean_url`의 기본 base `https://www.naver.com`에 붙어 `www.naver.com/{스토어}/products/{id}`로 저장되었다. `page_origin(page_url)`을 추가하고 `clean_url`의 `base`를 필수 인자로 바꿨다. 카드별 파싱(`_extract_product`)과 일괄 읽기(`_product_from_card`)는 `_collect_products`가 `page.url`에서 만든 origin을 같은 인자로 받는다.
+  - SUPERSEDED: `clean_url`이 `base="https://www.naver.com"`을 기본값으로 두고 크롤러가 base 없이 호출하던 방식 — 스토어 호스트가 상품 URL에 들어가지 않았다.
+- 수정 후 첫 실행은 URL 변경으로 전체 상품이 diff 에서 modified 로 잡혀 Kream 전체 검색이 일어난다. 11월 10일(전체 검색일) 실행 전에 병합하면 추가 비용이 없다.
+- [네이버 체크포인트] 체크포인트 `version` 을 1→2 로 올리고 상수 `CHECKPOINT_VERSION` 으로 뺐다. 수정 전 `www.naver.com` URL 이 담긴 같은 날 체크포인트가 병합 당일 재실행에서 재사용되는 것을 막는다.
+  - SUPERSEDED: 체크포인트 version 1 하드코딩 3곳 — URL 생성 규칙이 identity 에 없어 규칙이 바뀌어도 옛 캐시가 유효했음
+- 체크포인트가 이미 있는 날 병합하면, 그날 첫 실행에서 네이버 8개 스토어를 모두 다시 수집한다(브라우저 실행, 접근 제한 가능성). 다음 날부터는 날짜 경로가 달라 영향이 없다. 옛 version 1 파일은 아무 코드도 읽지 않으므로 지우지 않아도 된다.
+- `--mode kream` 은 오늘자 `*_products.json` 을 그대로 읽으므로 이 수정의 보호를 받지 않는다. 병합 당일에는 `full` 또는 `crawl` 로 결과 파일을 다시 만든 뒤 사용한다.
+
+## 2026-11-06 — 세일 URL 비활성 설정 정리와 테스트 기준선 복구
+
+- [설정] 나이키·아디다스·special 세일 URL을 빈 문자열로 정의해 비활성으로 유지하고, 세 크롤러는 `config.X_SALE_URL`을 직접 읽는다. 세일이 열리면 값만 채워 다시 켠다. 테스트 기준선(106개 전체 통과)을 복구하는 과정에서 정해졌다.
+  - SUPERSEDED: 세일 URL을 주석 처리해 속성 자체를 없애고 크롤러가 `getattr` 기본값으로 읽던 방식 — 속성이 없으면 테스트가 `AttributeError`로 깨지고 설정 존재 여부가 코드에서 드러나지 않아, 빈 문자열 정의와 직접 접근으로 되돌림
+- [테스트] 아디다스 HTTP 테스트는 테스트 URL을 주입하고, 네이버 수집 테스트는 일괄 카드 읽기가 실패하면 카드별 조회로 가도록 fixture를 맞춘다. 일괄 읽기 성공 경로를 검증하는 테스트는 아직 없다.
+
 ## 2026-11-05 — Kream 차익 결과에 직전 날짜 대비 표시 추가
 
 - [Kream] `kream/history_marker.py` 신설. 저장 시 오늘 이전 가장 최신 `output/YYYYMMDD/arbitrage_results.json`과 `(model_name, marketplace_site)` 키로 비교해 `previously_saved`, `price_status`(new/same/changed), changed일 때 `previous_marketplace_price`를 항목에 추가한다. `marketplace_price`만 비교하며 이전 파일은 청크 루프 전 1회만 읽는다. 같은 키의 여러 가격은 집합으로 보관해 오늘 가격이 집합에 있으면 same, 없으면 changed(이전 가격은 차이가 가장 작은 값, 동률이면 더 작은 값)로 판정한다. 이전 파일 없음은 전부 신규, JSON 오류·최상위 list 아님은 warning 후 전부 신규, 손상 레코드(dict 아님·키 누락·model_name/marketplace_site 비문자열·가격 None/bool/쉼표 문자열/비정수 float/Infinity/NaN)는 해당 건만 건너뛰고 건수를 warning으로 남긴다. 정수형 float(100.0)과 숫자 문자열("129000")은 허용한다.

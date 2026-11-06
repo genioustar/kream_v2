@@ -276,7 +276,7 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
 
 async def crawl_adidas() -> list[MarketplaceProduct]:
     """세일 목록을 수집한다. 미설정은 [], 접근·수집 실패는 예외로 구분한다."""
-    sale_url = (getattr(config, "ADIDAS_SALE_URL", "") or "").strip()
+    sale_url = config.ADIDAS_SALE_URL.strip()
     if not sale_url:
         logger.info("config.ADIDAS_SALE_URL 미설정 — 아디다스 크롤링 건너뜀")
         return []

@@ -57,10 +57,14 @@ MIN_PRICE_DIFF = 5000
 SITE_DELAY_MIN_SEC = 1.0
 SITE_DELAY_MAX_SEC = 3.0
 OUTPUT_DIR = "output"
-#NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
+# 빈 문자열이면 해당 크롤러는 건너뛴다.
+# 예시: https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok
+NIKE_SALE_URL = ""
 # 공식 아울렛 전체보기. grid=true가 없으면 캠페인 화면으로 이동한다.
-#ADIDAS_SALE_URL = "https://www.adidas.co.kr/outlet?grid=true"
-#SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"
+# 예시: https://www.adidas.co.kr/outlet?grid=true
+ADIDAS_SALE_URL = ""
+# 예시: https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579
+SPECIAL_SALE_URL = ""
 SPECIAL_MODEL_STRATEGY = "auto"
 MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
 

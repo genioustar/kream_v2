@@ -199,7 +199,7 @@ async def crawl_special() -> list[MarketplaceProduct]:
     Returns:
         site_name='special' 인 MarketplaceProduct 리스트.
     """
-    special_url = getattr(config, "SPECIAL_SALE_URL", "") or ""
+    special_url = config.SPECIAL_SALE_URL
     if not special_url.strip():
         logger.info("config.SPECIAL_SALE_URL 미설정 — special 크롤링 건너뜀")
         return []

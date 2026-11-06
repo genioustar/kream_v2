@@ -16,7 +16,7 @@ from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError, pause
 from naver.checkpoint import load_checkpoint, save_checkpoint
 from naver.diagnostics import NaverAccessError, NaverCollectionError, NaverDiagnostics, safe_url
-from naver.parser import clean_url, get_selectors, parse_price
+from naver.parser import clean_url, get_selectors, page_origin, parse_price
 from naver.public_search import navigate_public_search
 
 logger = get_logger("naver.crawler")
@@ -178,6 +178,7 @@ async def _extract_product(
     store_type: str,
     model_strategy: str,
     crawled_at: str,
+    origin: str,
 ) -> tuple[list[MarketplaceProduct], str | None]:
     """
     단일 상품 카드 Locator에서 상품 목록과 건너뜀 사유를 추출합니다.
@@ -185,6 +186,7 @@ async def _extract_product(
     대체 모델이 여러 개인 경우 복수 반환합니다.
     성공 시 건너뜀 사유는 None이고, 실패 시 품절/모델명 없음/파싱 오류 중
     하나를 반환합니다.
+    상품 URL의 base는 카드를 연 페이지의 origin입니다.
     """
     try:
         if await _is_sold_out_product(item, store_type):
@@ -217,7 +219,7 @@ async def _extract_product(
         # URL
         url_el = item.locator(selectors["url"]).first
         raw_url = await url_el.get_attribute("href")
-        product_url = clean_url(raw_url)
+        product_url = clean_url(raw_url, origin)
 
         # 모델명 목록 추출 (복수 가능)
         model_names = extract_model_names(product_name, strategy=model_strategy)
@@ -277,7 +279,9 @@ async def _read_cards(page, selectors: dict, store_type: str) -> list[dict]:
     )
 
 
-def _product_from_card(card: dict, site_name: str, model_strategy: str, crawled_at: str):
+def _product_from_card(
+    card: dict, site_name: str, model_strategy: str, crawled_at: str, origin: str,
+):
     if card.get("soldOut"):
         return [], SKIP_REASON_SOLD_OUT
     product_name = (card.get("name") or "").strip()
@@ -305,7 +309,7 @@ def _product_from_card(card: dict, site_name: str, model_strategy: str, crawled_
                 product_name=product_name,
                 model_name=model_name,
                 price=price,
-                url=clean_url(card.get("href") or ""),
+                url=clean_url(card.get("href") or "", origin),
                 crawled_at=crawled_at,
             )
             for model_name in model_names
@@ -325,6 +329,7 @@ async def _collect_products(
     diagnostics: NaverDiagnostics,
 ):
     """카드 전체를 한 번에 읽고, 실패하면 카드별로 다시 읽는다."""
+    origin = page_origin(page.url)
     skip_counts = {reason: 0 for reason in SKIP_REASONS}
     diagnostics.data["skip_counts"] = skip_counts
     products: list[MarketplaceProduct] = []
@@ -335,7 +340,9 @@ async def _collect_products(
         raw_cards = None
     if raw_cards is not None:
         for card in raw_cards[:total_count]:
-            extracted, skip_reason = _product_from_card(card, site_name, model_strategy, crawled_at)
+            extracted, skip_reason = _product_from_card(
+                card, site_name, model_strategy, crawled_at, origin,
+            )
             if extracted:
                 products.extend(extracted)
             elif skip_reason is not None:
@@ -346,7 +353,15 @@ async def _collect_products(
     items = page.locator(selectors["item"])
     for i in range(total_count):
         extracted, skip_reason = await diagnostics.run(
-            _extract_product(items.nth(i), selectors, site_name, store_type, model_strategy, crawled_at),
+            _extract_product(
+                items.nth(i),
+                selectors,
+                site_name,
+                store_type,
+                model_strategy,
+                crawled_at,
+                origin,
+            ),
             "parse",
         )
         if extracted:

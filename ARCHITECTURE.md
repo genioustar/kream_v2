@@ -29,7 +29,7 @@ main.py --mode full (기본)
   │     ├── nike/crawler.py    → output/YYYYMMDD/nike_products.json
   │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     └── special/crawler.py → output/YYYYMMDD/special_products.json
-  │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (미설정 시 스킵)
+  │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (빈 문자열이면 비활성, 스킵)
   │     * 오늘자 파일이 이미 있으면 스킵
   │
   ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
@@ -130,7 +130,8 @@ resell-sniper/
 │   ├── test_browser.py           # 독립 Chrome 실행·단일 탭·실패 정리 테스트
 │   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외 회귀 테스트
 │   ├── test_naver_checkpoint.py  # 날짜/설정별 캐시·실패 후 재개 회귀 테스트
-│   ├── test_naver_collection.py  # 파싱 실패·최종 보호 감지 시 완료 저장 방지
+│   ├── test_naver_collection.py  # 파싱 실패·최종 보호 감지 시 완료 저장 방지, 상품 URL origin 회귀(카드별·일괄 경로)
+│   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
@@ -176,7 +177,7 @@ resell-sniper/
 - `check_connection()` — Task Space 에서 `about:blank` 를 열고 `navigator.webdriver === true` 가 아닌지 확인한 뒤 그 Space 를 닫는다.
 
 ### nike/crawler.py
-- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **독립 Chrome 창 실행** (`create_browser()`). URL 출처: `config.NIKE_SALE_URL` (미설정/빈 값이면 즉시 [] 반환). redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
+- `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **독립 Chrome 창 실행** (`create_browser()`). URL 출처: `config.NIKE_SALE_URL` 직접 읽기. 빈 문자열이면 비활성, 즉시 [] 반환. redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
 - `_collect_via_api(page, target_count=100)` — 스크롤로 Nike JS가 `product_wall` API 호출을 유도하고 `page.on("response", ...)` 로 JSON 응답을 인터셉트해 수집. scrollY 변화 없음 NO_CHANGE_LIMIT(6)회 연속이면 종료
 - `_parse_api_product(item, crawled_at)` — API 응답 항목을 `MarketplaceProduct` 로 변환. 필드: `copy.title`, `copy.subTitle`, `prices.currentPrice`, `pdpUrl.url`, `productCode`
 - `_extract_model_name(card_text, href)` — `_parse_api_product` 내 폴백. 스타일코드(CN8490-002) 우선, href 세그먼트 2순위, 첫 줄 3순위
@@ -184,7 +185,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="nike") → `output/YYYYMMDD/nike_products.json`
 
 ### special/crawler.py
-- `crawl_special()` — `config.SPECIAL_SALE_URL` 페이지를 JS 휴리스틱으로 크롤링. **독립 Chrome 창 실행** (`create_browser()`). 미설정/빈 값이면 즉시 [] 반환. Chrome 실행 실패 시 오류를 전달한다.
+- `crawl_special()` — `config.SPECIAL_SALE_URL` 을 직접 읽어 JS 휴리스틱으로 크롤링. **독립 Chrome 창 실행** (`create_browser()`). 빈 문자열이면 비활성, 즉시 [] 반환. Chrome 실행 실패 시 오류를 전달한다.
 - `SPECIAL_MODEL_STRATEGY`가 지원 목록에 없으면 브라우저 연결 전에 `ValueError`로 설정 오류를 알린다.
 - `_JS_EXTRACT` — 3단계 휴리스틱으로 상품 카드 자동 탐지하는 JS 문자열
   - 전략 1: `<li>` 요소 중 img + a[href] + 가격패턴 모두 포함한 것
@@ -212,7 +213,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### adidas/crawler.py
-- `crawl_adidas()` — `ADIDAS_SALE_URL`의 세일 목록을 독립 Chrome에서 수집한다. 미설정이면 `[]`, 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
+- `crawl_adidas()` — `config.ADIDAS_SALE_URL` 을 직접 읽어 세일 목록을 독립 Chrome에서 수집한다. 빈 문자열이면 비활성(`[]`), 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
 - `_navigate(page, sale_url, diagnostics)` — 문서 응답 상태를 확인한다. 문서 429만 최대 2회 재시도하며 `_retry_delay(retry_after, attempt)`로 Retry-After 초/HTTP-date 또는 5·10초 대기를 적용한다. 서버 지정 대기가 `MAX_RETRY_WAIT_SEC=60`을 초과하면 일찍 재시도하지 않고 중단한다. `MAX_RATE_LIMIT_RETRIES=2`.
 - `_raise_http_error(status, url, retry_after)` — 상태별 안내를 포함한 예외. 403과 재시도 불가/소진 429는 `CrawlBlockedError`로 파이프라인에도 전파한다.
 - `_ResponseDiagnostics` — `on_response()`로 문서 상태와 document/XHR/fetch HTTP 오류를 기록한다. `check()`는 메인 문서 및 adidas.co.kr 하위 호스트의 `/api/` 상품·PLP·검색 경로 실패를 전달한다. 실측한 개별 상품 보조 경로 `/plp-app/api/product/{code}`와 장바구니·분석 요청은 진단 전용이며 목록 DOM으로 수집한다. `save(error)`는 실패 시 `output/YYYYMMDD/diagnostics/adidas_HHMMSS_ffffff.json`과 화면 PNG를 남긴다. URL·상태·Retry-After·본문 일부만 저장하며 쿠키/인증 헤더는 저장하지 않는다. 닫힌 페이지에서도 가능한 JSON 진단을 유지한다.
@@ -233,14 +234,17 @@ resell-sniper/
 - `SELECTORS` — 스토어 타입별 CSS 셀렉터 딕셔너리. `price` 키는 fallback 후보 리스트(list[str])로 관리
 - `get_selectors(store_type)` — 스토어 타입에 맞는 셀렉터 딕셔너리 반환
 - `parse_price(price_str)` — 가격 문자열에서 숫자 추출
-- `clean_url(raw_url, base)` — 상대 URL → 절대 URL 변환
+- `page_origin(page_url)` — scheme과 netloc이 있으면 `scheme://netloc`을 반환하고, 없으면 `page_url`을 그대로 반환한다.
+- `clean_url(raw_url, base)` — 상대 URL을 절대 URL로 변환한다. `base`는 필수 인자이며 기본값이 없다. 빈 값이면 None, `http`로 시작하면 그대로, `//`로 시작하면 `https:`를 붙이고, `/`로 시작하면 base 끝의 `/`를 뺀 뒤 경로를 붙인다. 그 외는 그대로 반환한다.
 
 ### naver/crawler.py
 - `_is_sold_out_product(item, store_type)` — `smart_store` 카드에서 `품절` 오버레이 또는 `일시품절` 배송 문구를 감지하면 수집 대상에서 제외한다. 제외된 상품은 `marketplace_products.json`에 저장되지 않아 Kream 조회 대상에서도 빠진다.
 - 네이버는 `create_browser()`로 독립 Chrome 창을 열고 사이트마다 작업 탭을 순차 생성한다. 기존 Chrome 로그인 상태는 공유하지 않는다.
 - `_wait_for_product_list(page, item_selector, site_name, diagnostics)` — 상품 목록을 15초간 기다린다. 로그인·보안 확인 화면이면 종료하지 않고 Enter를 기다린 뒤 30초간 목록을 다시 확인한다. `q`는 그 스토어를 중단한다. 네트워크 오류와 목록 타임아웃은 후속 스토어를 중단한다.
 - `_scroll_to_bottom(page, item_selector, diagnostics)` — 매 스크롤과 대기 중 접근 상태를 감시한다. 스크롤 간 3.5초 대기, 최대 30회, 카드 수가 3회 연속 같으면 종료한다.
-- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at)` — 단일 상품 카드 파싱. 성공 시 상품 목록과 `None`을, 건너뛸 때는 빈 목록과 `품절`·`모델명 없음`·`파싱 오류` 중 하나를 반환한다. 사이트 전략으로 모델명을 복수 변환한다.
+- `_extract_product(item, selectors, site_name, store_type, model_strategy, crawled_at, origin)` — 단일 상품 카드 파싱. 성공 시 상품 목록과 `None`을, 건너뛸 때는 빈 목록과 `품절`·`모델명 없음`·`파싱 오류` 중 하나를 반환한다. 사이트 전략으로 모델명을 복수 변환한다. 상품 링크는 `clean_url(href, origin)`이다.
+- `_product_from_card(card, site_name, model_strategy, crawled_at, origin)` — 일괄로 읽은 카드 dict를 같은 규칙으로 상품으로 변환한다. 상품 링크는 `clean_url(href, origin)`이다.
+- `_collect_products(page, selectors, site_name, store_type, model_strategy, crawled_at, total_count, diagnostics)` — 카드 전체를 한 번에 읽고, 실패하면 카드별로 다시 읽는다. 두 경로 모두 수집 시작 시점의 `page_origin(page.url)`을 `origin`으로 넘긴다.
 - `_crawl_site(context, site_info, run_id=None)` — 기본 `direct`는 `domcontentloaded`로 이동하며, `navigation="store_search_ui"`는 공개 홈의 검색 UI를 사용한다. 목록·스크롤·파싱·최종 반환까지 진단으로 감시한다. 설정 오류를 검증하고 성공/실패 보고서와 진단 예외를 보존한다. 품절·모델명 없음은 정상 제외이며 실제 파싱 오류가 있으면 완료 캐시를 만들지 않도록 실패 처리한다.
 - `crawl_marketplace()` — config.SEARCH_URLS를 단일 작업 탭으로 순차 처리한다. 같은 날 완료 캐시를 우선 읽고 모두 있으면 브라우저 실행도 생략한다. 실제 네트워크 수집 사이에만 1~3초 쉬며 정상 종료한 스토어만 캐시에 저장한다. 수집 실패·접근 제한 시 후속 스토어를 열지 않는다. 빈 설정은 [] 반환, URL 누락 항목은 건너뛴다.
 
@@ -252,8 +256,9 @@ resell-sniper/
 - 인증 쿠키는 존재 여부만 기록한다. 응답 본문·헤더·쿠키 값·입력값·페이지 제목·HTML·스크린샷은 저장하지 않는다. 진단은 `output/YYYYMMDD/diagnostics/naver_<run_id>_<site>.json`에 저장하며 저장 실패가 원래 제한 오류를 덮어쓰지 않는다. 내부 서버 판정 사유를 확정하는 기능은 아니다.
 
 ### naver/checkpoint.py
-- `load_checkpoint(site_info)` — 날짜와 URL(검색 조건 포함)·스토어명·타입·모델 추출 전략·접속 방식의 해시가 일치하는 완료 결과만 복원한다. 손상·불완전·다른 날짜 상품·스키마 오류는 재사용하지 않는다.
-- `save_checkpoint(site_info, products)` — 정상 완료 결과를 `output/YYYYMMDD/checkpoints/naver/<hash>.json`에 원자적으로 저장한다. 최종 상품 파일과 분리하여 부분 결과가 Kream 입력으로 섞이지 않게 한다. 할인율은 기존 main.py 최종 저장 단계에서 적용한다.
+- `CHECKPOINT_VERSION` — 완료 캐시 형식 버전. 현재 값은 2. 경로 해시(identity)와 저장 JSON의 `version`에 함께 기록한다. 상품 URL 생성 규칙처럼 저장 형식이 바뀌면 올려, 이전 형식의 같은 날 파일은 조회하지 않고 내용의 버전이 달라도 복원하지 않는다.
+- `load_checkpoint(site_info)` — 날짜와 URL(검색 조건 포함)·스토어명·타입·모델 추출 전략·접속 방식·`CHECKPOINT_VERSION`의 해시가 일치하는 완료 결과만 복원한다. 버전이 다르거나 손상·불완전·다른 날짜 상품·스키마 오류는 재사용하지 않는다.
+- `save_checkpoint(site_info, products)` — 정상 완료 결과를 `output/YYYYMMDD/checkpoints/naver/<hash>.json`에 `version=CHECKPOINT_VERSION`으로 원자적으로 저장한다. 최종 상품 파일과 분리하여 부분 결과가 Kream 입력으로 섞이지 않게 한다. 할인율은 기존 main.py 최종 저장 단계에서 적용한다.
 
 ### naver/public_search.py
 - `navigate_public_search(page, url, diagnostics, timeout_ms)` — 공개 홈에서 검색창을 열고 설정 URL의 검색어와 페이지 크기를 UI로 적용한다. 정확도순·이미지형·첫 페이지와 지원 페이지 크기만 허용하고, 검색 결과 제목·최종 URL·총수·카드 수를 검증한다. 홈 문서가 로그인 페이지로 떨어지면 중단하지 않고 Enter를 기다린 뒤 홈 이동을 다시 한다. 비공개 API 호출은 하지 않는다.
@@ -318,10 +323,10 @@ resell-sniper/
 
 
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
-| `NIKE_SALE_URL` | 미설정 (주석 예시만 존재) | 나이키 성인 세일 신발 URL (빈 값/미설정 시 나이키 크롤링 스킵) |
-| `ADIDAS_SALE_URL` | https://www.adidas.co.kr/outlet?grid=true | 아디다스 세일 목록 URL. 공식 아울렛 전체보기(grid=true 필수). 의류·신발·용품 포함, Kids 제외 (빈 값/미설정 시 스킵) |
+| `NIKE_SALE_URL` | `""` | 나이키 성인 세일 신발 URL. 빈 문자열이면 비활성, 크롤러는 `config.NIKE_SALE_URL` 을 직접 읽음. 예시: `https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok` |
+| `ADIDAS_SALE_URL` | `""` | 아디다스 세일 목록 URL. 빈 문자열이면 비활성, 크롤러는 `config.ADIDAS_SALE_URL` 을 직접 읽음. 예시: `https://www.adidas.co.kr/outlet?grid=true` (공식 아울렛 전체보기, grid=true 필수). 의류·신발·용품 포함, Kids 제외 |
 | `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원 |
-| `SPECIAL_SALE_URL` | 미설정 (주석 예시만 존재) | 범용 적응형 크롤러 대상 URL (빈 값/미설정 시 special 크롤링 스킵) |
+| `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |
 | `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 30%, musinsa 0%, nike 0%, special 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
 

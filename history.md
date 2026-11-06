@@ -70,6 +70,10 @@
   - SUPERSEDED: Playwright `chromium.launch(channel="chrome")`로 독립 창 실행 — 자동화 플래그 때문에 브라우저가 차단되었다.
   - SUPERSEDED: 디버깅 포트와 stealth를 쓰지 않음 — 참고 저장소의 일반 Chrome 연결로 되돌리되, 임의 UA·Win32 플랫폼 위조와 쿠키 JSON 복원은 넣지 않는다.
 
+## 2026-10-28 — 네이버 상품 주소의 기준 호스트
+
+- [네이버 URL] `clean_url`은 카드를 연 페이지의 origin을 `base`로 받는다. 상대 경로가 `www.naver.com`으로 붙거나 인자 누락으로 파싱 오류가 되지 않는다.
+
 ## 2026-10-08 — 루티크 공개 검색 UI 경로
 
 - [루티크 검색] 검색 URL 직접 접속은 HTTP 307으로 로그인 화면에 이동하지만 공개 스토어에서 검색창→검색→80개 보기를 사용하면 인증 쿠키 없이 동일한 디젤 검색 55개 카드가 제공됨을 Playwright MCP로 확인했다. `navigation="store_search_ui"`로 해당 UI 경로를 사용하며 검색 조건·결과 완전성을 검증한다.

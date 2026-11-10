@@ -1,7 +1,7 @@
 # resell-sniper 아키텍처
 
 ## 개요
-네이버 쇼핑몰(브랜드스토어·스마트스토어), 아디다스 공홈, 무신사, 나이키 공홈, special URL에서 상품을 수집하고, Kream에서 동일 상품의 리셀 가격과 거래량을 조회하여 차익 거래 기회를 자동으로 탐색하는 파이프라인.
+네이버 쇼핑몰(브랜드스토어·스마트스토어), 아디다스 공홈, 무신사, SSF SHOP, 나이키 공홈, special URL에서 상품을 수집하고, Kream에서 동일 상품의 리셀 가격과 거래량을 조회하여 차익 거래 기회를 자동으로 탐색하는 파이프라인.
 
 ## 실행 방법
 
@@ -26,6 +26,8 @@ main.py --mode full (기본)
   │     │     설정한 세일 목록 전체 수집, Kids 카테고리 제외
   │     ├── musinsa/crawler.py → output/YYYYMMDD/musinsa_products.json
   │     │     브랜드 PLP 또는 아울렛 랭킹 API 수집, 품절/모델코드 미추출 상품 제외
+  │     ├── ssfshop/crawler.py → output/YYYYMMDD/ssfshop_products.json
+  │     │     ADIDAS KOREA 브랜드관 전체(의류·잡화·신발), currentPage 순회
   │     ├── nike/crawler.py    → output/YYYYMMDD/nike_products.json
   │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     └── special/crawler.py → output/YYYYMMDD/special_products.json
@@ -80,6 +82,10 @@ resell-sniper/
 │   ├── __init__.py
 │   └── crawler.py        # crawl_musinsa() — 무신사 상품, MarketplaceProduct 포맷 저장
 │
+├── ssfshop/              # SSF SHOP 브랜드관 목록 크롤러
+│   ├── __init__.py
+│   └── crawler.py        # crawl_ssfshop() — ADIDAS KOREA 전체 상품, MarketplaceProduct 포맷 저장
+│
 ├── nike/                 # 나이키 공홈 크롤러
 │   ├── __init__.py
 │   └── crawler.py        # crawl_nike() — 세일 신발 무한스크롤, MarketplaceProduct 포맷 저장
@@ -108,6 +114,7 @@ resell-sniper/
 │   │   ├── marketplace_products.json
 │   │   ├── adidas_products.json
 │   │   ├── musinsa_products.json
+│   │   ├── ssfshop_products.json
 │   │   ├── nike_products.json
 │   │   ├── special_products.json
 │   │   ├── arbitrage_results.json
@@ -136,7 +143,8 @@ resell-sniper/
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
-│   └── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
+│   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
+│   └── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
 
 ├── requirements.txt
 └── venv/
@@ -214,6 +222,16 @@ resell-sniper/
 - 브랜드 페이지네이션: 1페이지 응답의 `pagination.nextPageUrl`을 그대로 따라간다. 2페이지 이후 API는 `hmacId`가 필요하므로 page 번호를 직접 조립하지 않는다.
 - `pagination.hasNext`가 참인데 `nextPageUrl`이 비어 있으면(None, 빈 문자열) `RuntimeError`를 던지고 부분 결과를 반환하지 않는다. `hasNext`가 거짓이면 정상 종료한다.
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
+
+### ssfshop/crawler.py
+- `crawl_ssfshop()` — `config.SSFSHOP_SALE_URL`을 직접 읽어 ADIDAS KOREA 브랜드관 목록을 수집한다. URL이 비어 있으면 즉시 `[]`. 경로의 첫 세그먼트가 브랜드관 slug다. 단독 실행 진입점은 없다.
+- 순회: 쿼리의 `currentPage`는 무시하고 1페이지부터 덮어쓴다. 한 페이지의 상품 영역은 `<section id="goods_container">` 안의 `li.god-item`만이다. 컨테이너가 있고 카드가 0개면 종료한다. 컨테이너가 없으면 예외다. 페이지 요청 사이에만 `pause(2.5, 4.5, "SSF SHOP 다음 목록 페이지 요청 전 대기")`를 호출하고, 빈 페이지 뒤에는 쉬지 않는다. 안전 상한은 `MAX_PAGES = 150`.
+- 실패: `HTTPError`는 `check_response`로 넘긴다. 403/429는 `CrawlBlockedError`, 그 외 HTTP 오류·타임아웃은 그대로 전파한다. 중간 페이지 실패, 컨테이너가 없는 페이지, 상한까지 카드가 남아 있으면 일부 결과를 반환하지 않고 예외를 올린다. 첫 페이지 컨테이너가 있고 카드가 0개면 `[]`.
+- 가격: 카드 가격 칸의 `판매가` 숫자만 저장한다. 원가·할인율은 쓰지 않는다. 판매가에는 추가할인이 이미 반영되어 있고 `SITE_DISCOUNT_RATES["ssfshop"] = 0`이라 `sale_price`는 산출하지 않는다.
+- 카드 변환: 상품명은 공백을 정리한 `<span class="name">`이다. 모델코드는 `suffix_single`로 뽑는다. 모델코드가 여러 개 나오면 이름 끝의 마지막 하나만 쓴다. 상세 URL은 `https://www.ssfshop.com/{slug}/{godNo}/good`(`view-godno`, 추적 쿼리 없음). `(url, model_name)`으로 중복을 제거한다. 이름·판매가·모델코드·godNo가 없으면 debug 로그 후 건너뛴다.
+- 호출 경로: `_brand_slug`, `_page_url`, `_detail_url`, `_fetch_html`/`_fetch_html_async`, `_GoodsListParser`, `_open_container`, `_note_section_end`, `_raise_if_unclosed`, `_parse_cards`, `_normalize_text`, `_products_from_card`, `_sale_price`.
+- 목록 파서는 `#goods_container`가 `section`으로 한 번 열리는 것만 컨테이너로 본다. 컨테이너 안에서만 태그 이름 스택으로 짝을 검사한다. 끝 태그가 스택 맨 위와 다르면 `RuntimeError`다. `HTML_VOID_ELEMENTS`의 void 요소는 스택에 넣지 않는다. 컨테이너 안 `<section>` 시작은 예외다. 컨테이너가 없거나 두 번 열리면 예외다. 문서의 section 깊이가 0 아래로 내려가면 짝 없는 `</section>`으로 예외다. 파싱이 끝났는데 컨테이너가 열린 채여도 예외이며 메시지에 마지막으로 본 godNo가 들어간다. 한 카드에서 이름 span 또는 가격 span 캡처가 두 번 열리면 예외다. 컨테이너가 있고 카드가 0개일 때만 정상 종료다. 컨테이너 밖의 section 시작·끝만 깊이로 세고, 그 외 컨테이너 밖 태그는 검사하지 않는다.
+- 저장 포맷: `MarketplaceProduct` (site_name="ssfshop") → `output/YYYYMMDD/ssfshop_products.json`
 
 ### adidas/crawler.py
 - `crawl_adidas()` — `config.ADIDAS_SALE_URL` 을 직접 읽어 세일 목록을 독립 Chrome에서 수집한다. 빈 문자열이면 비활성(`[]`), 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
@@ -329,9 +347,10 @@ resell-sniper/
 | `NIKE_SALE_URL` | `""` | 나이키 성인 세일 신발 URL. 빈 문자열이면 비활성, 크롤러는 `config.NIKE_SALE_URL` 을 직접 읽음. 예시: `https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok` |
 | `ADIDAS_SALE_URL` | `""` | 아디다스 세일 목록 URL. 빈 문자열이면 비활성, 크롤러는 `config.ADIDAS_SALE_URL` 을 직접 읽음. 예시: `https://www.adidas.co.kr/outlet?grid=true` (공식 아울렛 전체보기, grid=true 필수). 의류·신발·용품 포함, Kids 제외 |
 | `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원 |
+| `SSFSHOP_SALE_URL` | ssfshop.com/ADIDAS-KOREA/main?...brandShopNo=BDMA29AKU | SSF SHOP ADIDAS KOREA 브랜드관 전체(의류·잡화·신발). 빈 문자열이면 비활성, 크롤러는 `config.SSFSHOP_SALE_URL`을 직접 읽음. `currentPage`는 1부터 덮어씀 |
 | `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |
-| `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 30%, musinsa 0%, nike 0%, special 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
+| `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 30%, musinsa 0%, nike 0%, special 0%, ssfshop 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
 
 ## 새 크롤링 소스 추가 방법
 
@@ -343,7 +362,7 @@ resell-sniper/
 
 ## 브라우저 세션 운용
 - ego lite 와 `ego-browser` 가 준비된 뒤 `pip install -r requirements.txt`로 의존성을 설치한다. `python main.py`는 사용자의 ego lite 안에 Task Space `resell-sniper` 를 연다. `python chrome.py`는 그 Space 에서 webdriver 표시를 확인한 뒤 Space 를 닫는다.
-- 네이버·Kream·나이키·아디다스·special은 공통 창 팩토리를 사용한다. 무신사는 HTTP API 방식을 유지한다.
+- 네이버·Kream·나이키·아디다스·special은 공통 창 팩토리를 사용한다. 무신사는 HTTP API, SSF SHOP은 서버 렌더링 HTML GET을 사용한다.
 - Chrome 확장·Node 의존성·연결 승인 없이 동작하며 기존 사용자 창은 건드리지 않는다. 네이버 로그인·보안 확인 화면에서는 열린 Chrome에서 확인한 뒤 Enter로 수집을 이어간다. 계정 보호와 HTTP 403/429는 종료한다.
 - 네이버 스토어 전환 대기는 1~3초다. Kream 검색·상세·정기·청크 휴식은 없으며 기존 렌더링/입력 대기는 유지한다.
 - 단일 프로세스 작업 탭은 최대 1개다. 여러 파이프라인을 동시에 실행하지 않는다. 차단 감지 시 후속 요청을 중단하며 차단 방지를 보장하지 않는다. 아디다스 최초 문서의 429에 한해 위의 제한된 재시도 정책을 적용한다.

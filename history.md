@@ -1,5 +1,16 @@
 # 변경 히스토리
 
+## 2026-11-10 — SSF SHOP 아디다스 코리아 상품 크롤러 추가
+
+- [SSF SHOP] `ssfshop/crawler.py`가 `config.SSFSHOP_SALE_URL`의 ADIDAS KOREA 브랜드관 목록을 URL 그대로 수집한다. 의류·잡화·신발 전체를 포함하고 신발만 걸러내지 않는다. 목록은 서버가 렌더한 HTML이라 브라우저 없이 urllib GET으로 읽고, `currentPage`는 1부터 덮어쓰며 `#goods_container`가 비면 끝낸다.
+- 중간 페이지 실패와 `MAX_PAGES`(150) 도달은 일부 결과를 반환하지 않고 예외로 올린다. HTTP 403/429는 `CrawlBlockedError`다.
+- 저장 가격은 카드의 판매가(추가할인이 이미 반영된 금액)다. `SITE_DISCOUNT_RATES["ssfshop"] = 0`이라 `sale_price`는 산출하지 않는다. 이름 끝 모델코드는 `suffix_single`로 뽑는다.
+- 상품명에서 모델코드가 여러 개 나오면 이름 끝의 마지막 하나만 상품으로 만든다. `3STR` 같은 3-STRIPES 약어는 Kream 검색 대상이 되지 않는다.
+- `main.py` STEP 1 무신사 블록 다음에 `ssfshop_products.json` 저장을 붙였다. diff와 Kream 적재는 기존 `*_products.json` 글롭을 그대로 쓴다.
+- 목록 파서는 `/>` 없는 void 태그를 스택에 넣지 않는다. 카드나 `#goods_container`가 닫히지 않으면 일부 목록 대신 `RuntimeError`를 올린다.
+- `#goods_container` 안에서는 태그 이름 스택으로 짝을 검사하고, 짝이 맞지 않거나 한 카드의 이름·가격 영역이 두 번 열리면 일부 목록 대신 `RuntimeError`를 올린다.
+- 컨테이너가 없는 응답, 두 번 열린 컨테이너, 컨테이너 안의 section, 짝 없는 section 끝은 일부 목록 대신 `RuntimeError`다. 컨테이너가 있고 카드가 0개일 때만 정상 종료다.
+
 ## 2026-11-09 — 무신사 수집 도중 실패 시 부분 결과를 저장하지 않음
 
 - [무신사] 페이지 순회 도중 요청이 실패하면 예외를 전파한다. 403/429 는 CrawlBlockedError 로 파이프라인을 멈추고, 그 외 실패는 main 이 경고 후 파일을 저장하지 않아 다음 실행에서 재시도된다.

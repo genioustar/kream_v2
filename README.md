@@ -1,6 +1,6 @@
 # kream_v2
 
-네이버 스토어·아디다스·무신사·나이키·special URL의 상품을 수집하고, Kream 시세와 비교하여 차익 거래 기회를 탐색하는 파이프라인.
+네이버 스토어·아디다스·무신사·나이키·SSF SHOP·special URL의 상품을 수집하고, Kream 시세와 비교하여 차익 거래 기회를 탐색하는 파이프라인.
 
 ## 요구사항
 
@@ -103,6 +103,7 @@ python main.py --mode kream
 | `checkpoints/naver/*.json` | 같은 날 완료한 네이버 스토어 결과 (재실행 시 재사용) |
 | `adidas_products.json`   | 아디다스 Extra Sale 수집 상품                  |
 | `musinsa_products.json`  | 무신사 브랜드 또는 아울렛 랭킹 수집 상품       |
+| `ssfshop_products.json`  | SSF SHOP ADIDAS KOREA 브랜드관 전체 상품 (의류·잡화·신발) |
 | `nike_products.json`     | 나이키 세일 수집 상품                          |
 | `special_products.json`  | special URL 수집 상품                           |
 | `arbitrage_results.json` | 차익 거래 가능 상품 목록 (가격 차이 기준 정렬) |
@@ -126,6 +127,7 @@ python main.py --mode kream
 | `NIKE_SALE_URL`          | 미설정                     | 나이키 세일 URL                           |
 | `ADIDAS_SALE_URL`        | 미설정                     | 아디다스 세일 URL                         |
 | `MUSINSA_SALE_URL`       | 무신사 아울렛 신발 랭킹    | `/brand/{slug}` 또는 `/main/.../ranking` |
+| `SSFSHOP_SALE_URL`       | ADIDAS KOREA 브랜드관      | 의류·잡화·신발 전체. 빈 문자열이면 크롤링 생략 |
 | `SPECIAL_SALE_URL`       | 미설정                     | 범용 크롤링 대상 URL                      |
 | `SPECIAL_MODEL_STRATEGY` | `auto`                     | special 상품명 모델 추출 전략             |
 

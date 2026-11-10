@@ -32,6 +32,7 @@ from kream.history_marker import RESULT_FILENAME, load_previous_price_map, mark_
 from common.pacing import CrawlBlockedError
 from musinsa.crawler import crawl_musinsa
 from naver.crawler import crawl_marketplace
+from ssfshop.crawler import crawl_ssfshop
 from nike.crawler import crawl_nike
 from special.crawler import crawl_special
 
@@ -174,6 +175,25 @@ async def main(mode: str) -> None:
                 raise
             except Exception as exc:
                 logger.warning(f"무신사 크롤링 실패 (파이프라인은 계속): {exc}")
+
+        # SSF SHOP 크롤링
+        ssfshop_output = output_dir / "ssfshop_products.json"
+        if ssfshop_output.exists():
+            logger.info(f"오늘자 파일 존재 — SSF SHOP 크롤링 스킵: {ssfshop_output}")
+        else:
+            logger.info("SSF SHOP 상품 크롤링 시작")
+            try:
+                ssfshop_products = await crawl_ssfshop()
+                if ssfshop_products:
+                    _apply_sale_price(ssfshop_products, "ssfshop")
+                    _save_json(ssfshop_products, ssfshop_output)
+                    logger.info(f"SSF SHOP 상품 {len(ssfshop_products)}개 저장 → {ssfshop_output}")
+                else:
+                    logger.warning("SSF SHOP 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
+            except CrawlBlockedError:
+                raise
+            except Exception as exc:
+                logger.warning(f"SSF SHOP 크롤링 실패 (파이프라인은 계속): {exc}")
 
         # 나이키 크롤링
         nike_output = output_dir / "nike_products.json"

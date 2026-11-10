@@ -126,6 +126,7 @@ resell-sniper/
 ├── plans/                # 작업 계획 산출물
 ├── tests/
 │   ├── test_adidas_http.py       # HTTP 상태·재시도·진단·페이지 진행 회귀 테스트
+│   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락 예외·페이지 사이 요청 간격 회귀 테스트
 │   ├── test_sequential_crawling.py # 순차 처리·휴식·접근 제한 중단 회귀 테스트
 │   ├── test_browser.py           # 독립 Chrome 실행·단일 탭·실패 정리 테스트
 │   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외 회귀 테스트
@@ -202,14 +203,16 @@ resell-sniper/
 - `_build_referer(page_url, brand)` — 캠페인 URL을 API Referer용 `/brand/{brand}/products?...` 형태로 정규화.
 - `_build_first_api_url(page_url, brand, page_size)` — 사용자 URL의 query(`gf`, `sortCode` 등)를 보존하고 `brand`, `page=1`, `size=100`, `caller=FLAGSHIP`을 붙여 첫 API URL 생성.
 - `_build_ranking_api_url(page_url)` — 랭킹 페이지 query를 `client.musinsa.com/api/home/web/v5/pans/ranking` URL로 변환.
-- `_fetch_json(url, referer)` / `_fetch_json_async(url, referer)` — stdlib urllib 요청을 `asyncio.to_thread`로 실행.
+- `_fetch_json(url, referer)` / `_fetch_json_async(url, referer)` — stdlib urllib 요청을 `asyncio.to_thread`로 실행. `HTTPError`는 `common.pacing.check_response`를 거쳐 403/429는 `CrawlBlockedError`로 바뀌고, 다른 HTTP 오류는 원래 예외 그대로 전파.
 - `_resolve_price(item)` — DOM 카드 가격과 일치하는 `finalPrice` 우선, 없으면 `couponPrice`, `price` 순으로 폴백.
 - `_build_marketplace_products(...)` — 두 API의 공통 필드를 `slash_first` 모델 전략으로 변환하며 품절·모델코드 미추출 상품 제외.
 - `_to_marketplace_products(item, crawled_at)` / `_to_ranking_marketplace_products(item, crawled_at)` — 브랜드 PLP/랭킹 API 항목을 공통 변환기로 전달.
 - `_extract_ranking_items(data)` — 랭킹 API `MULTICOLUMN` 모듈의 `PRODUCT_COLUMN` 항목 평탄화.
 - `_crawl_brand_products(sale_url, crawled_at)` — 브랜드 PLP `pagination.nextPageUrl`의 `hmacId`를 따라 전체 페이지 수집.
 - `_crawl_ranking_products(sale_url, crawled_at)` — 랭킹 API `link.next`를 따라 최대 20페이지 수집.
+- 수집 도중 요청이 실패하면 예외가 그대로 전파되며 부분 결과를 반환하지 않는다(403/429는 `CrawlBlockedError`로 파이프라인 중단, 그 외는 main이 경고 후 파일을 저장하지 않음). 랭킹의 API 항목 없음은 정상 종료로 그때까지 수집한 결과를 반환한다.
 - 브랜드 페이지네이션: 1페이지 응답의 `pagination.nextPageUrl`을 그대로 따라간다. 2페이지 이후 API는 `hmacId`가 필요하므로 page 번호를 직접 조립하지 않는다.
+- `pagination.hasNext`가 참인데 `nextPageUrl`이 비어 있으면(None, 빈 문자열) `RuntimeError`를 던지고 부분 결과를 반환하지 않는다. `hasNext`가 거짓이면 정상 종료한다.
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### adidas/crawler.py

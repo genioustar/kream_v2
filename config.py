@@ -67,6 +67,8 @@ ADIDAS_SALE_URL = ""
 SPECIAL_SALE_URL = ""
 SPECIAL_MODEL_STRATEGY = "auto"
 MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+# SSF SHOP ADIDAS KOREA 브랜드관 전체 상품. 의류·잡화·신발을 URL 그대로 수집한다.
+SSFSHOP_SALE_URL = "https://www.ssfshop.com/ADIDAS-KOREA/main?dspCtgryNo=SFM&brandShopNo=BDMA29AKU&brndShopId=RTADA&currentPage=1&sortColumn=BEST_DC_SEQ&serviceType=DSP&ctgrySectCd=GNRL_CTGRY&fitPsbYn=N&subBrndCtgryGodYn=Y&cnrSn=23416&cnrSetSn=367764"
 
 # 사이트별 수동 할인율 (%) — Kream 외 크롤러에 적용. 0이면 sale_price 미산출.
 SITE_DISCOUNT_RATES = {
@@ -75,4 +77,5 @@ SITE_DISCOUNT_RATES = {
     "musinsa": 0,
     "nike": 0,
     "special": 0,
+    "ssfshop": 0,
 }

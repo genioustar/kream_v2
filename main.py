@@ -16,7 +16,8 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import asdict
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 
@@ -44,6 +45,31 @@ FULL_CRAWL_DAYS: frozenset[int] = frozenset({1, 10, 20, 30})
 KREAM_CHUNK_SIZE = 200           # 200개 초과 시 청크 분할
 
 logger = get_logger("main")
+
+
+@dataclass(frozen=True)
+class SiteCrawler:
+    """STEP 1에 한 번만 등록하는 사이트.
+
+    key는 `{key}_products.json` 파일명과 SITE_DISCOUNT_RATES 키로 같이 쓴다.
+    required면 네이버처럼 실패 시 파이프라인을 멈추고, 아니면 선택 사이트다.
+    """
+
+    key: str
+    label: str
+    crawl: Callable[[], Awaitable[list[MarketplaceProduct]]]
+    required: bool
+
+
+# 실행 순서는 등록 순서다. 필수 사이트는 네이버(marketplace)뿐이다.
+SITE_CRAWLERS: tuple[SiteCrawler, ...] = (
+    SiteCrawler("marketplace", "네이버", crawl_marketplace, True),
+    SiteCrawler("adidas", "아디다스", crawl_adidas, False),
+    SiteCrawler("musinsa", "무신사", crawl_musinsa, False),
+    SiteCrawler("ssfshop", "SSF SHOP", crawl_ssfshop, False),
+    SiteCrawler("nike", "나이키", crawl_nike, False),
+    SiteCrawler("special", "special", crawl_special, False),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +109,55 @@ def _apply_sale_price(products: list[MarketplaceProduct], source_key: str) -> No
         p.sale_price = int(round(p.price * (1 - rate / 100)))
 
 
+async def _crawl_site(site: SiteCrawler, output_dir: Path) -> None:
+    """오늘자 파일이 있으면 건너뛰고, 없으면 필수·선택 규칙으로 한 사이트를 수집한다."""
+    output = output_dir / f"{site.key}_products.json"
+    if output.exists():
+        logger.info("오늘자 파일 존재 — %s 크롤링 스킵: %s", site.label, output)
+        return
+    if site.required:
+        await _crawl_required_site(site, output)
+    else:
+        await _crawl_optional_site(site, output)
+
+
+async def _crawl_required_site(site: SiteCrawler, output: Path) -> None:
+    """네이버. 빈 결과도 저장하고, RuntimeError면 프로세스를 종료한다."""
+    logger.info("%s 크롤링 시작", site.label)
+    try:
+        products = await site.crawl()
+        _apply_sale_price(products, site.key)
+        _save_json(products, output)
+        logger.info("%s 상품 %s개 저장 → %s", site.label, len(products), output)
+    except RuntimeError as exc:
+        # CrawlBlockedError는 RuntimeError라 이 경로로 종료한다.
+        logger.error("%s 크롤링 전체 실패: %s", site.label, exc)
+        sys.exit(1)
+    except Exception as exc:
+        logger.error("%s_products.json 저장 실패: %s", site.key, exc)
+        raise
+
+
+async def _crawl_optional_site(site: SiteCrawler, output: Path) -> None:
+    """선택 사이트. 빈 결과는 저장하지 않고, 차단만 파이프라인을 멈춘다."""
+    logger.info("%s 크롤링 시작", site.label)
+    try:
+        products = await site.crawl()
+        if products:
+            _apply_sale_price(products, site.key)
+            _save_json(products, output)
+            logger.info("%s 상품 %s개 저장 → %s", site.label, len(products), output)
+        else:
+            logger.warning(
+                "%s 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)",
+                site.label,
+            )
+    except CrawlBlockedError:
+        raise
+    except Exception as exc:
+        logger.warning("%s 크롤링 실패 (파이프라인은 계속): %s", site.label, exc)
+
+
 def _extract_models_from_diff(diff_path: Path) -> list[str]:
     """diff 파일의 added/modified 항목에서 고유 model_name 목록을 순서대로 반환한다."""
     data = json.loads(diff_path.read_text(encoding="utf-8"))
@@ -119,117 +194,8 @@ async def main(mode: str) -> None:
         logger.info("STEP 1: 사이트 크롤링")
         logger.info("=" * 60)
 
-        # 네이버 크롤링
-        marketplace_output = output_dir / "marketplace_products.json"
-        if marketplace_output.exists():
-            logger.info(f"오늘자 파일 존재 — 네이버 크롤링 스킵: {marketplace_output}")
-        else:
-            try:
-                marketplace_products = await crawl_marketplace()
-                _apply_sale_price(marketplace_products, "marketplace")
-                _save_json(marketplace_products, marketplace_output)
-                logger.info(f"네이버 상품 {len(marketplace_products)}개 저장 → {marketplace_output}")
-            except RuntimeError as exc:
-                logger.error(f"네이버 크롤링 전체 실패: {exc}")
-                sys.exit(1)
-            except Exception as exc:
-                logger.error(f"marketplace_products.json 저장 실패: {exc}")
-                raise
-
-        # 아디다스 크롤링
-        adidas_output = output_dir / "adidas_products.json"
-        if adidas_output.exists():
-            logger.info(f"오늘자 파일 존재 — 아디다스 크롤링 스킵: {adidas_output}")
-        else:
-            logger.info("아디다스 Extra Sale 크롤링 시작")
-            try:
-                adidas_products = await crawl_adidas()
-                if adidas_products:
-                    _apply_sale_price(adidas_products, "adidas")
-                    _save_json(adidas_products, adidas_output)
-                    logger.info(f"아디다스 상품 {len(adidas_products)}개 저장 → {adidas_output}")
-                else:
-                    logger.warning("아디다스 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except CrawlBlockedError:
-                raise
-            except Exception as exc:
-                logger.warning(f"아디다스 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # 무신사 크롤링
-        musinsa_output = output_dir / "musinsa_products.json"
-        if musinsa_output.exists():
-            logger.info(f"오늘자 파일 존재 — 무신사 크롤링 스킵: {musinsa_output}")
-        else:
-            logger.info("무신사 상품 크롤링 시작")
-            try:
-                musinsa_products = await crawl_musinsa()
-                if musinsa_products:
-                    _apply_sale_price(musinsa_products, "musinsa")
-                    _save_json(musinsa_products, musinsa_output)
-                    logger.info(f"무신사 상품 {len(musinsa_products)}개 저장 → {musinsa_output}")
-                else:
-                    logger.warning("무신사 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except CrawlBlockedError:
-                raise
-            except Exception as exc:
-                logger.warning(f"무신사 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # SSF SHOP 크롤링
-        ssfshop_output = output_dir / "ssfshop_products.json"
-        if ssfshop_output.exists():
-            logger.info(f"오늘자 파일 존재 — SSF SHOP 크롤링 스킵: {ssfshop_output}")
-        else:
-            logger.info("SSF SHOP 상품 크롤링 시작")
-            try:
-                ssfshop_products = await crawl_ssfshop()
-                if ssfshop_products:
-                    _apply_sale_price(ssfshop_products, "ssfshop")
-                    _save_json(ssfshop_products, ssfshop_output)
-                    logger.info(f"SSF SHOP 상품 {len(ssfshop_products)}개 저장 → {ssfshop_output}")
-                else:
-                    logger.warning("SSF SHOP 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except CrawlBlockedError:
-                raise
-            except Exception as exc:
-                logger.warning(f"SSF SHOP 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # 나이키 크롤링
-        nike_output = output_dir / "nike_products.json"
-        if nike_output.exists():
-            logger.info(f"오늘자 파일 존재 — 나이키 크롤링 스킵: {nike_output}")
-        else:
-            logger.info("나이키 세일 신발 크롤링 시작")
-            try:
-                nike_products = await crawl_nike()
-                if nike_products:
-                    _apply_sale_price(nike_products, "nike")
-                    _save_json(nike_products, nike_output)
-                    logger.info(f"나이키 상품 {len(nike_products)}개 저장 → {nike_output}")
-                else:
-                    logger.warning("나이키 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except CrawlBlockedError:
-                raise
-            except Exception as exc:
-                logger.warning(f"나이키 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # special 크롤링
-        special_output = output_dir / "special_products.json"
-        if special_output.exists():
-            logger.info(f"오늘자 파일 존재 — special 크롤링 스킵: {special_output}")
-        else:
-            logger.info("SPECIAL_SALE_URL 크롤링 시작")
-            try:
-                special_products = await crawl_special()
-                if special_products:
-                    _apply_sale_price(special_products, "special")
-                    _save_json(special_products, special_output)
-                    logger.info(f"special 상품 {len(special_products)}개 저장 → {special_output}")
-                else:
-                    logger.warning("special 수집 결과 없음 — 파일 저장 생략")
-            except CrawlBlockedError:
-                raise
-            except Exception as exc:
-                logger.warning(f"special 크롤링 실패 (파이프라인은 계속): {exc}")
+        for site in SITE_CRAWLERS:
+            await _crawl_site(site, output_dir)
 
         if mode == "crawl":
             all_products = _load_all_products(output_dir)

@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from common.ego_session import Request, Response
 from common.models import KreamProduct, MarketplaceProduct
+from common.pacing import CrawlBlockedError
 from kream.comparator import find_arbitrage
 from kream.crawler import (
     _find_verified_kream_product,
@@ -10,7 +12,6 @@ from kream.crawler import (
 from kream.parser import (
     model_numbers_match,
     parse_kream_model_number,
-    parse_kream_model_number_html,
 )
 
 
@@ -20,17 +21,6 @@ class KreamModelParserTests(unittest.TestCase):
 
     def test_rejects_unrelated_detail_text(self):
         self.assertIsNone(parse_kream_model_number("발매일 23/08/07"))
-
-    def test_parses_server_rendered_detail_html(self):
-        detail_html = (
-            '<p class="text-lookup"><!--[-->'
-            "모델번호 IG5349"
-            "<!--]--></p>"
-        )
-        self.assertEqual(
-            parse_kream_model_number_html(detail_html),
-            "IG5349",
-        )
 
     def test_matches_only_full_normalized_model_number(self):
         self.assertTrue(model_numbers_match("ig-5749", "ＩＧ５７４９"))
@@ -99,30 +89,25 @@ class KreamDetailModelLoadingTests(unittest.IsolatedAsyncioTestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    async def test_reads_model_number_from_server_response_without_dom_wait(self):
-        response = MagicMock()
-        response.text = AsyncMock(
-            return_value='<p class="text-lookup">모델번호 IG5349</p>'
-        )
-        page = MagicMock()
-        page.goto = AsyncMock(return_value=response)
-        page.wait_for_selector = AsyncMock()
-
-        model_number = await _load_detail_model_number(
-            page,
+    async def test_reads_model_number_from_dom_when_response_body_is_none(self):
+        response = Response(
             "https://kream.co.kr/products/156167",
+            200,
+            {},
+            Request(
+                "https://kream.co.kr/products/156167",
+                "document",
+                True,
+                object(),
+            ),
+            None,
         )
-
-        self.assertEqual(model_number, "IG5349")
-        page.wait_for_selector.assert_not_awaited()
-
-    async def test_dom_fallback_waits_for_attached_responsive_duplicates(self):
         model_locator = MagicMock()
         model_locator.all_text_contents = AsyncMock(
             return_value=["모델번호 IG5349", "모델번호 IG5349"]
         )
         page = MagicMock()
-        page.goto = AsyncMock(return_value=None)
+        page.goto = AsyncMock(return_value=response)
         page.wait_for_selector = AsyncMock()
         page.locator.return_value = model_locator
 
@@ -137,6 +122,40 @@ class KreamDetailModelLoadingTests(unittest.IsolatedAsyncioTestCase):
             page.wait_for_selector.await_args.kwargs["state"],
             "attached",
         )
+
+    async def test_blocked_detail_page_raises_without_dom_wait(self):
+        response = Response(
+            "https://kream.co.kr/products/156167",
+            200,
+            {},
+            Request(
+                "https://kream.co.kr/products/156167",
+                "document",
+                True,
+                object(),
+            ),
+            None,
+        )
+        model_locator = MagicMock()
+        model_locator.wait_for = AsyncMock()
+        model_locator.all_text_contents = AsyncMock(return_value=["모델번호 IG5349"])
+        page = MagicMock()
+        page.goto = AsyncMock(return_value=response)
+        page.wait_for_selector = AsyncMock()
+        page.locator.return_value = model_locator
+
+        with patch("kream.crawler._is_blocked_page", new=AsyncMock(return_value=True)):
+            with self.assertRaisesRegex(
+                CrawlBlockedError,
+                "Kream 상세 페이지 접근 제한/비정상 응답",
+            ):
+                await _load_detail_model_number(
+                    page,
+                    "https://kream.co.kr/products/156167",
+                )
+
+        page.wait_for_selector.assert_not_awaited()
+        model_locator.wait_for.assert_not_awaited()
 
 
 class KreamComparatorModelGuardTests(unittest.TestCase):

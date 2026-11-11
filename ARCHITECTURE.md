@@ -145,7 +145,9 @@ resell-sniper/
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
-│   └── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
+│   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
+│   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
+│   └── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
 
 ├── requirements.txt
 └── venv/
@@ -352,7 +354,7 @@ resell-sniper/
 | `SSFSHOP_SALE_URL` | ssfshop.com/ADIDAS-KOREA/main?...brandShopNo=BDMA29AKU | SSF SHOP ADIDAS KOREA 브랜드관 전체(의류·잡화·신발). 빈 문자열이면 비활성, 크롤러는 `config.SSFSHOP_SALE_URL`을 직접 읽음. `currentPage`는 1부터 덮어씀 |
 | `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |
-| `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 30%, musinsa 0%, nike 0%, special 0%, ssfshop 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
+| `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 20%, musinsa 0%, nike 0%, special 0%, ssfshop 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
 
 ## 새 크롤링 소스 추가 방법
 

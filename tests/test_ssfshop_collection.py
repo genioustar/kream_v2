@@ -459,7 +459,8 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
              patch.object(crawler, "_fetch_html_async", fetch), \
              patch.object(crawler, "MIN_PRODUCTS", 7), \
-             patch.object(crawler, "pause", new_callable=AsyncMock):
+             patch.object(crawler, "pause", new_callable=AsyncMock), \
+             self.assertLogs("ssfshop.crawler", level="ERROR") as logs:
             with self.assertRaises(RuntimeError) as caught:
                 await crawler.crawl_ssfshop()
         message = str(caught.exception)
@@ -468,6 +469,9 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("종료 페이지 2", message)
         self.assertIn("점검·차단 화면이거나 상품이 크게 줄었을 수 있음", message)
         self.assertIn("실제 감소면 MIN_PRODUCTS 를 내린다", message)
+        self.assertEqual(logs.output, [
+            "ERROR:ssfshop.crawler:SSF SHOP 수집 수 하한 미달: 3 < 7 (종료 페이지 2)",
+        ])
 
     async def test_first_empty_page_below_floor_raises(self):
         seen, urlopen = self._urlopen([

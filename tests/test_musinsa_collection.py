@@ -141,8 +141,12 @@ class MusinsaCollectionTestCase(unittest.IsolatedAsyncioTestCase):
 
 class BrandCollectionTests(MusinsaCollectionTestCase):
     async def crawl_recording_delay(self, sale_url, fetch):
-        """간격 상수는 0으로 바꾸지 않고, 페이지 사이 sleep 호출만 기록한다."""
+        """간격 상수는 0으로 바꾸지 않고, 페이지 사이 sleep 호출만 기록한다.
+
+        크롤이 예외를 내면 그 예외를 그대로 올린다. 그때까지 기록은 self.recorded_delay 에 있다.
+        """
         sleep = AsyncMock()
+        self.recorded_delay = sleep
         with patch.object(config, "MUSINSA_SALE_URL", sale_url), \
                 patch.object(crawler, "_fetch_json_async", fetch), \
                 patch.object(crawler.asyncio, "sleep", sleep):
@@ -251,11 +255,17 @@ class BrandCollectionTests(MusinsaCollectionTestCase):
             return brand_page_with_pagination(calls["count"], True, SAME_NEXT_PAGE_URL)
 
         with self.assertRaises(RuntimeError) as caught:
-            await self.crawl(BRAND_SALE_URL, fetch)
+            await self.crawl_recording_delay(BRAND_SALE_URL, fetch)
         self.assertNotIsInstance(caught.exception, CrawlBlockedError)
         self.assertIn("다음 페이지 주소가 반복됩니다", str(caught.exception))
         self.assertIn(f"page={FAILING_PAGE_NUMBER}", str(caught.exception))
         self.assertEqual(calls["count"], FAILING_PAGE_NUMBER)
+        repeated_url_delay_count = FAILING_PAGE_NUMBER - 1
+        self.assertEqual(self.recorded_delay.await_count, repeated_url_delay_count)
+        self.assertEqual(
+            self.recorded_delay.await_args_list,
+            [call(crawler.REQUEST_DELAY_SEC)] * repeated_url_delay_count,
+        )
 
     async def test_repeated_first_request_url_raises(self):
         calls = {"count": 0, "first_url": None}
@@ -286,10 +296,16 @@ class BrandCollectionTests(MusinsaCollectionTestCase):
 
         with patch.object(crawler, "MAX_BRAND_PAGES", BRAND_PAGE_CAP):
             with self.assertRaises(RuntimeError) as caught:
-                await self.crawl(BRAND_SALE_URL, fetch)
+                await self.crawl_recording_delay(BRAND_SALE_URL, fetch)
         self.assertNotIsInstance(caught.exception, CrawlBlockedError)
         self.assertIn(f"최대 페이지({BRAND_PAGE_CAP})", str(caught.exception))
         self.assertEqual(calls["count"], BRAND_PAGE_CAP)
+        cap_delay_count = BRAND_PAGE_CAP - 1
+        self.assertEqual(self.recorded_delay.await_count, cap_delay_count)
+        self.assertEqual(
+            self.recorded_delay.await_args_list,
+            [call(crawler.REQUEST_DELAY_SEC)] * cap_delay_count,
+        )
 
     async def test_has_next_false_at_brand_page_cap_returns_products(self):
         calls = {"count": 0}

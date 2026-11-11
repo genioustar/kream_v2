@@ -32,7 +32,7 @@ main.py --mode full (기본)
   │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     └── special/crawler.py → output/YYYYMMDD/special_products.json
   │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (빈 문자열이면 비활성, 스킵)
-  │     * 오늘자 파일이 이미 있으면 스킵
+  │     * `SITE_CRAWLERS` 순서. 오늘자 파일이 이미 있으면 스킵
   │
   ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
   │     ├── 모델명 소스 결정
@@ -146,6 +146,7 @@ resell-sniper/
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
+│   ├── test_main_site_registry.py # STEP 1 사이트 등록 표: 키 일치·스킵·빈 결과·예외·할인율(네이버 포함)·ValueError 전파·호출 순서
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
 │   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
@@ -163,6 +164,12 @@ resell-sniper/
 - `--mode crawl` — STEP 1만 실행 (모든 사이트 크롤링 후 저장)
 - `--mode full` — STEP 1~4 전체 실행 (기본값)
 - `--mode kream` — STEP 2~3만 실행 (오늘자 `*_products.json` 로드 후 Kream 검색)
+- `SiteCrawler` — frozen dataclass. `key`(파일명·`SITE_DISCOUNT_RATES` 키), `label`(로그 표시명), `crawl`(비동기 크롤러), `required`(필수 여부).
+- `SITE_CRAWLERS` — STEP 1 등록 표. 순서: marketplace(네이버, 필수), adidas, musinsa, ssfshop, nike, special. 키 집합은 `SITE_DISCOUNT_RATES`와 같다.
+- `_crawl_site(site, output_dir)` — 오늘자 `{key}_products.json`이 있으면 크롤러를 호출하지 않는다. 없으면 `required`에 따라 아래 함수를 호출한다.
+- `_crawl_required_site(site, output)` — 시작 로그 후 수집한다. 빈 결과도 저장한다. `RuntimeError`는 오류 로그 후 `sys.exit(1)`. `CrawlBlockedError`는 `RuntimeError`의 서브클래스라 이 경로로 종료한다. 그 외 예외는 `{key}_products.json 저장 실패` 로그 후 다시 던진다.
+- `_crawl_optional_site(site, output)` — 시작 로그 후 수집한다. 빈 결과면 저장하지 않고 `(다음 실행 시 재시도)` 경고를 남긴다. `CrawlBlockedError`는 그대로 다시 던지고, 그 외 예외는 경고 후 다음 사이트로 넘어간다.
+- 시작 로그는 `"%s 크롤링 시작"`이다. 스킵·저장·실패 문구의 표시명은 `label`이다.
 - `_load_all_products(output_dir)` — 오늘자 디렉토리의 모든 `*_products.json` 자동 감지·합산 로드
 - `_load_products_json(path)` — 단일 `*_products.json` → `MarketplaceProduct` 리스트 복원
 - `_apply_sale_price(products, source_key)` — STEP 1 각 크롤러 결과에 `config.SITE_DISCOUNT_RATES[source_key]` 할인율을 적용해 `sale_price` 부여. 0%면 sale_price=None 유지
@@ -367,7 +374,7 @@ resell-sniper/
 ## 새 크롤링 소스 추가 방법
 
 1. `{소스명}/crawler.py` 생성 — `crawl_{소스명}()` 구현, `MarketplaceProduct` 포맷으로 반환
-2. `main.py` STEP 1에 크롤링 호출 및 `{소스명}_products.json` 저장 추가
+2. `SITE_CRAWLERS`에 `SiteCrawler`를 추가하고 `config.SITE_DISCOUNT_RATES`에 같은 키를 넣는다. 저장 파일은 `{key}_products.json`
 3. 나머지(Kream 검색 대상 포함·diff 생성·차익 비교)는 자동 처리됨
 
 **참고:** Phase 1 에서 추가된 `nike/crawler.py` 가 이 패턴의 실제 사례이다.

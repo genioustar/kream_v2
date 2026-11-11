@@ -1,5 +1,11 @@
 # 변경 히스토리
 
+## 2026-11-11 — STEP 1 사이트 등록 표
+
+- [main] STEP 1의 사이트별 반복 블록을 frozen dataclass `SiteCrawler` 튜플 `SITE_CRAWLERS`로 모았다. 순서는 marketplace, adidas, musinsa, ssfshop, nike, special이다. `required`인 네이버만 빈 결과도 저장하고 `RuntimeError`에서 `sys.exit(1)`한다. `CrawlBlockedError`는 `RuntimeError`의 서브클래스라 네이버에서는 그 종료 경로를 탄다. 선택 사이트는 빈 결과를 저장하지 않고, `CrawlBlockedError`는 전파하며, 그 외 예외는 경고 후 다음 사이트로 넘어간다.
+- [main] 시작 로그는 `"%s 크롤링 시작"`으로 통일하고 네이버도 출력한다. special의 빈 결과 경고도 다른 선택 사이트와 같이 `(다음 실행 시 재시도)`를 붙인다.
+- [테스트] `tests/test_main_site_registry.py`가 등록 표 키와 `SITE_DISCOUNT_RATES` 키 일치, 스킵, 빈 결과, 예외, 할인율, 호출 순서를 고정한다. 표가 크롤러 함수 객체를 담으므로 테스트는 `patch("main.SITE_CRAWLERS")`로 crawl 필드를 바꾼다. STEP 1의 f-string 로그 19개를 제거해 `MAX_FSTRING_LOG_CALLS`를 107로 내렸다.
+
 ## 2026-11-11 — Kream 상세 DOM 단계의 None 반환 테스트
 
 - [Kream] `KreamDetailModelLoadingTests`가 `_load_detail_model_number`의 미검증 None 경로를 고정한다. 셀렉터 대기 예외는 `all_text_contents`를 호출하지 않고 None을 반환한다. 텍스트 읽기 예외는 파싱을 호출하지 않고 None, 모델번호가 아닌 문단과 빈 목록도 None이며 네 경우 모두 `CrawlBlockedError`가 아니다. `page.goto`가 예외를 내도 응답 None으로 `check_response`를 통과한 뒤 DOM에서 모델번호를 반환한다.

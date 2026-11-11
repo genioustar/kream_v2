@@ -10,8 +10,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# 2026-11-11 기준 저장소 전체(tests·venv 제외) f-string 로그 호출 수. 올리지 말고 내리기만 한다.
-MAX_FSTRING_LOG_CALLS = 126
+# 2026-11-11 STEP 1 등록 표로 f-string 로그 19개를 뺀 저장소 전체(tests·venv 제외) 호출 수. 올리지 말고 내리기만 한다.
+MAX_FSTRING_LOG_CALLS = 107
 LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical"}
 EXCLUDED_DIRS = {"venv", ".venv", "tests", "__pycache__"}
 FIX_HINT = (

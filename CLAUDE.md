@@ -62,7 +62,7 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 - [ ] history.md 에 SUPERSEDED 처리해야 할 뒤집힌 결정이 없는가
 
 ## 규칙과 강제 수단
-반복된 실수는 문서가 아니라 검사로 막는다. 사용자가 같은 실수를 지적하면 고치고 이 표에 행을 더한다. 행이 이미 있는데 강제 수단이 없으면 반복이므로 같은 변경에서 검사를 만든다.
+반복된 실수는 문서가 아니라 검사로 막는다. 아래 테스트는 로컬과 CI(`.github/workflows/tests.yml`, main push·PR)에서 같은 명령 `PYTHONPATH=. python -m unittest discover -s tests` 로 실행된다. 사용자가 같은 실수를 지적하면 고치고 이 표에 행을 더한다. 행이 이미 있는데 강제 수단이 없으면 반복이므로 같은 변경에서 검사를 만든다.
 
 | 규칙 | 강제 수단 | 근거가 된 실수 |
 |---|---|---|

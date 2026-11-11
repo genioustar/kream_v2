@@ -59,6 +59,7 @@ resell-sniper/
 ├── CLAUDE.md             # Claude/Codex 작업 지침
 ├── README.md             # 사용자용 실행 안내
 ├── history.md            # 주요 변경 결정 기록
+├── .github/workflows/tests.yml # CI: main push·PR 에서 전체 unittest 실행(로컬과 같은 명령)
 ├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream)
 ├── chrome.py             # ego lite Task Space 에서 webdriver 표시 점검
 ├── ego/

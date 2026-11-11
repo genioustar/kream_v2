@@ -61,15 +61,12 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 - [ ] history.md 의 최신 항목이 실제 코드 상태와 일치하는가
 - [ ] history.md 에 SUPERSEDED 처리해야 할 뒤집힌 결정이 없는가
 
-## 크롤러 검증 시 Playwright MCP 활용 규칙
+## 크롤러 검증 시 ego-browser 활용 규칙
 
-크롤러 코드를 수정하면 글로벌 CLAUDE.md 의 Evaluator 단계에서 **Playwright MCP**로 대상 사이트의 실제 DOM을 읽어 크롤링 JSON과 교차 검증한다. Kasada·Akamai·Kream SPA 를 우회하려면 실렌더링 브라우저가 필수이므로 Firecrawl·Fetch 같은 정적 HTML MCP 는 사용 금지.
+크롤러 코드를 수정하면 글로벌 CLAUDE.md 의 Evaluator 단계에서 **ego-browser**(`/ego-browser`)로 대상 사이트의 실제 DOM을 읽어 크롤링 JSON과 교차 검증한다. Kasada·Akamai·Kream SPA 를 우회하려면 실렌더링 브라우저가 필수이므로 Firecrawl·Fetch 같은 정적 HTML MCP 는 사용 금지. 브라우저 에러 대응은 `.claude/rules/browser-errors.md` 를 따른다.
 
-### 설치 (최초 1회, 사용자가 직접 실행)
-```
-claude mcp add playwright npx @playwright/mcp@latest
-```
-설치 후 `/mcp` 로 connected 상태 확인.
+### 사용 준비
+- 검증 전에 `ego-browser skill` 을 실행해 설치된 버전의 안내를 읽는다. 명령이 없으면 `/ego-browser` 스킬의 설치 안내를 따른다.
 
 ### 세션 공유 원칙
 - 검증 브라우저도 확장 없이 독립 실행한다. 크롤러 종료 후 순차 검증하며 기존 Chrome 로그인은 공유하지 않는다.
@@ -78,7 +75,7 @@ claude mcp add playwright npx @playwright/mcp@latest
 
 ### 검증 절차 (Evaluator Agent 수행)
 1. 크롤러 JSON 로드: `output/YYYYMMDD/<site>_products.json`
-2. Playwright MCP 로 대상 URL 오픈:
+2. ego-browser 로 대상 URL 오픈 (TaskSpace 하나, 끝나면 `finish({ keep: [] })`):
    - nike: `config.NIKE_SALE_URL`
    - adidas: `config.ADIDAS_SALE_URL`
    - naver: `config.SEARCH_URLS[*].url`
@@ -99,7 +96,7 @@ claude mcp add playwright npx @playwright/mcp@latest
 ### 스킵 금지
 - 정적 HTML MCP(Fetch, Firecrawl)로 SPA·탐지 사이트를 검증하지 말 것
 - 검증 없이 "DOM 이 같을 것"이라 추정하지 말 것 (실측 필수)
-- 글로벌 규칙의 Evaluator 호출을 MCP 검증으로 대체하지 말 것 — MCP 검증은 Evaluator 가 사용하는 **도구**이지 Evaluator 역할 자체가 아니다
+- 글로벌 규칙의 Evaluator 호출을 ego-browser 검증으로 대체하지 말 것 — ego-browser 검증은 Evaluator 가 사용하는 **도구**이지 Evaluator 역할 자체가 아니다
 
 ## MD 파일 컨텍스트 최적화 원칙
 대화 세션 종료 전 또는 사용자가 요청 시, 아래 기준으로 md 파일을 정리할 것.

@@ -366,4 +366,4 @@ resell-sniper/
 - Chrome 확장·Node 의존성·연결 승인 없이 동작하며 기존 사용자 창은 건드리지 않는다. 네이버 로그인·보안 확인 화면에서는 열린 Chrome에서 확인한 뒤 Enter로 수집을 이어간다. 계정 보호와 HTTP 403/429는 종료한다.
 - 네이버 스토어 전환 대기는 1~3초다. Kream 검색·상세·정기·청크 휴식은 없으며 기존 렌더링/입력 대기는 유지한다.
 - 단일 프로세스 작업 탭은 최대 1개다. 여러 파이프라인을 동시에 실행하지 않는다. 차단 감지 시 후속 요청을 중단하며 차단 방지를 보장하지 않는다. 아디다스 최초 문서의 429에 한해 위의 제한된 재시도 정책을 적용한다.
-- 검증: Python 단위 테스트, `python chrome.py`로 `navigator.webdriver` 점검. 실제 사이트 DOM/JSON 교차검증은 크롤러 종료 후 확장 없는 Playwright MCP로 수행한다.
+- 검증: Python 단위 테스트, `python chrome.py`로 `navigator.webdriver` 점검. 실제 사이트 DOM/JSON 교차검증은 크롤러 종료 후 확장 없는 ego-browser(`/ego-browser`)로 수행한다.

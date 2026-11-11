@@ -20,6 +20,8 @@ BASE_PRICE = 50000
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_FORBIDDEN = 403
 HTTP_SERVER_ERROR = 500
+BRAND_PAGE_CAP = 4
+SAME_NEXT_PAGE_URL = "https://api.musinsa.com/same"
 
 
 def http_error(status):
@@ -240,6 +242,71 @@ class BrandCollectionTests(MusinsaCollectionTestCase):
             sleep.await_args_list,
             [call(crawler.REQUEST_DELAY_SEC)] * EARLY_STOP_DELAY_COUNT,
         )
+
+    async def test_repeated_next_page_url_raises(self):
+        calls = {"count": 0}
+
+        async def fetch(url, referer):
+            calls["count"] += 1
+            return brand_page_with_pagination(calls["count"], True, SAME_NEXT_PAGE_URL)
+
+        with self.assertRaises(RuntimeError) as caught:
+            await self.crawl(BRAND_SALE_URL, fetch)
+        self.assertNotIsInstance(caught.exception, CrawlBlockedError)
+        self.assertIn("다음 페이지 주소가 반복됩니다", str(caught.exception))
+        self.assertIn(f"page={FAILING_PAGE_NUMBER}", str(caught.exception))
+        self.assertEqual(calls["count"], FAILING_PAGE_NUMBER)
+
+    async def test_repeated_first_request_url_raises(self):
+        calls = {"count": 0, "first_url": None}
+
+        async def fetch(url, referer):
+            calls["count"] += 1
+            if calls["first_url"] is None:
+                calls["first_url"] = url
+            return brand_page_with_pagination(calls["count"], True, calls["first_url"])
+
+        with self.assertRaises(RuntimeError) as caught:
+            await self.crawl(BRAND_SALE_URL, fetch)
+        self.assertNotIsInstance(caught.exception, CrawlBlockedError)
+        self.assertIn("다음 페이지 주소가 반복됩니다", str(caught.exception))
+        self.assertIn(f"page={FIRST_PAGE_NUMBER}", str(caught.exception))
+        self.assertEqual(calls["count"], FIRST_PAGE_NUMBER)
+
+    async def test_endless_distinct_urls_raise_at_brand_page_cap(self):
+        calls = {"count": 0}
+
+        async def fetch(url, referer):
+            calls["count"] += 1
+            return brand_page_with_pagination(
+                calls["count"],
+                True,
+                f"https://api.musinsa.com/next{calls['count'] + 1}",
+            )
+
+        with patch.object(crawler, "MAX_BRAND_PAGES", BRAND_PAGE_CAP):
+            with self.assertRaises(RuntimeError) as caught:
+                await self.crawl(BRAND_SALE_URL, fetch)
+        self.assertNotIsInstance(caught.exception, CrawlBlockedError)
+        self.assertIn(f"최대 페이지({BRAND_PAGE_CAP})", str(caught.exception))
+        self.assertEqual(calls["count"], BRAND_PAGE_CAP)
+
+    async def test_has_next_false_at_brand_page_cap_returns_products(self):
+        calls = {"count": 0}
+
+        async def fetch(url, referer):
+            calls["count"] += 1
+            has_next = calls["count"] < BRAND_PAGE_CAP
+            next_page_url = f"https://api.musinsa.com/next{calls['count'] + 1}" if has_next else None
+            return brand_page_with_pagination(calls["count"], has_next, next_page_url)
+
+        with patch.object(crawler, "MAX_BRAND_PAGES", BRAND_PAGE_CAP):
+            products = await self.crawl(BRAND_SALE_URL, fetch)
+        self.assertEqual(
+            [product.model_name for product in products],
+            [model_code(page) for page in range(1, BRAND_PAGE_CAP + 1)],
+        )
+        self.assertEqual(calls["count"], BRAND_PAGE_CAP)
 
 
 class RankingCollectionTests(MusinsaCollectionTestCase):

@@ -1,5 +1,9 @@
 # 변경 히스토리
 
+## 2026-11-11 — 무신사 브랜드 순회가 끝나지 않는 경우를 예외로 막음
+
+- [무신사] 브랜드 순회는 방문한 `nextPageUrl`을 기억한다. 같은 주소가 다시 나오면 `RuntimeError`로 중단한다. 첫 요청 주소도 방문 집합에 넣는다. `hasNext`가 참인 채 `MAX_BRAND_PAGES`(100, 페이지당 100개라 최대 1만 개)에 도달해도 `RuntimeError`로 중단한다. 두 경우 모두 그때까지 모은 상품을 반환하지 않는다. `hasNext`가 거짓이면 상한 페이지를 포함해 정상 종료한다.
+
 ## 2026-11-10 — SSF SHOP 아디다스 코리아 상품 크롤러 추가
 
 - [SSF SHOP] `ssfshop/crawler.py`가 `config.SSFSHOP_SALE_URL`의 ADIDAS KOREA 브랜드관 목록을 URL 그대로 수집한다. 의류·잡화·신발 전체를 포함하고 신발만 걸러내지 않는다. 목록은 서버가 렌더한 HTML이라 브라우저 없이 urllib GET으로 읽고, `currentPage`는 1부터 덮어쓰며 `#goods_container`가 비면 끝낸다.

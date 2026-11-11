@@ -144,7 +144,7 @@ resell-sniper/
 │   ├── test_naver_collection.py  # 파싱 실패·최종 보호 감지 시 완료 저장 방지, 상품 URL origin 회귀(카드별·일괄 경로)
 │   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
-│   ├── test_kream_model_match.py # Kream 상세 모델번호 검증·비교 회귀 테스트
+│   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트

@@ -5,6 +5,12 @@
 - [무신사] 브랜드 순회가 다음 주소 반복이나 페이지 상한으로 끊길 때, 그 페이지에서는 요청 간격을 기다리지 않는다. 테스트는 예외 전 `asyncio.sleep(REQUEST_DELAY_SEC)` 횟수가 실패 페이지보다 하나 적은지 확인하고, 상한 테스트는 상한보다 하나 적은 횟수를 확인한다.
 - [SSF SHOP] 수집 수가 `MIN_PRODUCTS` 미만이면 `RuntimeError` 앞에 수집 수, 하한, 종료 페이지를 lazy %-format ERROR 로그로 남긴다.
 
+## 2026-11-11 — Kream 상세의 죽은 서버 HTML 경로 제거
+
+- [Kream] `_load_detail_model_number`는 상세 모델번호를 `attached` DOM 텍스트에서만 읽는다. `ego/space_host.mjs`는 응답 본문을 나이키 `api.nike.com/discover/product_wall` XHR에만 담고 Document `body`는 항상 null이라, `response.text()`는 `RuntimeError("응답 본문이 없습니다.")`로 실패한다. `logs/crawler_20261109.log`의 DOM 폴백 433회, `crawler_20261110.log` 517회, `crawler_20261111.log` 309회가 모두 `error=RuntimeError`였다.
+  - SUPERSEDED: 상세 서버 HTML 을 우선 파싱하고 DOM 으로 폴백 — ego lite 는 Document 본문을 넘기지 않아 서버 경로가 항상 실패했다
+- [Kream] 상세가 차단 화면이면 `_load_detail_model_number`는 `CrawlBlockedError`를 올리고 `wait_for_selector`와 locator 대기를 호출하지 않는다. `KreamDetailModelLoadingTests.setUp`의 `_is_blocked_page` 거짓 패치는 그대로 두고, 그 테스트 안에서만 참으로 덮어 확인한다.
+
 ## 2026-11-11 — SSF 최소 상품 수 하한(1,000)
 
 - [SSF SHOP] 카드 0개 페이지로 순회가 끝난 뒤 수집 수가 `MIN_PRODUCTS`(1,000) 미만이면 `RuntimeError`를 올리고 결과를 반환하지 않는다. 2026-11-11 실측은 1~41페이지에 상품이 있고 42페이지에서 카드 0개로 끝나 2,184개(162초)였으며, 하한은 그 약 46%다. `SSFSHOP_SALE_URL`이 비어 있으면 하한 검사 없이 `[]`다.

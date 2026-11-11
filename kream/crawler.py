@@ -19,7 +19,6 @@ from kream.parser import (
     KREAM_SELECTORS,
     model_numbers_match,
     parse_kream_model_number,
-    parse_kream_model_number_html,
     parse_kream_price,
     parse_trade_count,
 )
@@ -209,20 +208,8 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
 
     check_response(response)
     _raise_if_kream_limited(page)
-    if response is not None:
-        try:
-            model_number = parse_kream_model_number_html(await response.text())
-            if model_number:
-                return model_number
-        except Exception as exc:
-            logger.debug(
-                f"Kream 상세 HTML 모델번호 파싱 실패(DOM 폴백): "
-                f"url={product_url}, error={type(exc).__name__}"
-            )
-
     if await _is_blocked_page(page):
         raise CrawlBlockedError("Kream 상세 페이지 접근 제한/비정상 응답 — 후속 요청 중단")
-    # SSR HTML에서 찾지 못한 경우에만 SPA가 만든 DOM을 폴백으로 확인한다.
     try:
         await page.wait_for_selector(
             KREAM_SELECTORS["detail_model_number"],

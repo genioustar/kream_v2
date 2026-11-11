@@ -7,7 +7,6 @@ CSS 셀렉터 상수도 이 파일에서 중앙 관리한다.
 """
 import re
 import unicodedata
-from html.parser import HTMLParser
 
 
 # ---------------------------------------------------------------------------
@@ -45,40 +44,6 @@ def parse_kream_model_number(text: str) -> str | None:
         return None
     model_number = match.group(1).strip()
     return model_number or None
-
-
-class _KreamDetailModelNumberHTMLParser(HTMLParser):
-    """상세 HTML의 문단 텍스트 중 모델번호 값을 찾는 내부 파서."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._in_paragraph = False
-        self._text_parts: list[str] = []
-        self.model_number: str | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if self.model_number is None and tag == "p":
-            self._in_paragraph = True
-            self._text_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_paragraph:
-            self._text_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag != "p" or not self._in_paragraph:
-            return
-
-        self._in_paragraph = False
-        self.model_number = parse_kream_model_number("".join(self._text_parts))
-        self._text_parts = []
-
-
-def parse_kream_model_number_html(detail_html: str) -> str | None:
-    """Playwright가 받은 Kream 상세 HTML에서 실제 모델번호를 추출한다."""
-    parser = _KreamDetailModelNumberHTMLParser()
-    parser.feed(detail_html)
-    return parser.model_number
 
 
 def normalize_model_number(model_number: str) -> str:

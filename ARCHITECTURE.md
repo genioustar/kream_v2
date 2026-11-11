@@ -147,7 +147,8 @@ resell-sniper/
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
 │   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
-│   └── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
+│   ├── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
+│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 호출 수가 기준선을 넘지 않음(새로 늘리면 실패)
 
 ├── requirements.txt
 └── venv/

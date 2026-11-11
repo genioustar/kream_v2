@@ -1,5 +1,9 @@
 # 변경 히스토리
 
+## 2026-11-11 — Kream 상세 DOM 단계의 None 반환 테스트
+
+- [Kream] `KreamDetailModelLoadingTests`가 `_load_detail_model_number`의 미검증 None 경로를 고정한다. 셀렉터 대기 예외는 `all_text_contents`를 호출하지 않고 None을 반환한다. 텍스트 읽기 예외는 파싱을 호출하지 않고 None, 모델번호가 아닌 문단과 빈 목록도 None이며 네 경우 모두 `CrawlBlockedError`가 아니다. `page.goto`가 예외를 내도 응답 None으로 `check_response`를 통과한 뒤 DOM에서 모델번호를 반환한다.
+
 ## 2026-11-11 — JSON 결과 파일을 원자적으로 저장
 
 - [저장] `common/atomic_io.py`의 `write_json_atomic`이 같은 디렉터리 임시 파일에 JSON(`ensure_ascii=False`, `indent=2`, UTF-8)을 쓰고 `replace`한다. 직렬화나 쓰기가 실패하면 임시 파일을 지우고 예외를 다시 던지며 기존 파일은 유지된다. 부모 디렉터리는 만들지 않는다. `main._save_json`, 차익 결과 저장, `diff_output`의 diff JSON 두 곳이 이 함수를 쓴다.

@@ -1,5 +1,12 @@
 # 변경 히스토리
 
+## 2026-11-11 — 반복된 실수를 저장소 규칙 검사로 고정
+
+- [하네스] `tests/test_rule_crawler_except.py`: 크롤러 모듈의 except 가 raise 없이 break 하거나 CrawlBlockedError 를 삼키면 실패. 실제 과거 코드(9d5690a 무신사 250·307행)를 잡는 것을 확인했다.
+- [하네스] `tests/test_rule_docs_sync.py`: ARCHITECTURE.md tests 트리와 SITE_DISCOUNT_RATES 표를 실제 파일·config.py 와 대조. 추가 즉시 문서의 아디다스 30%(실제 20)와 규칙 테스트 2개 누락을 잡아 함께 고쳤다.
+- [하네스] `tests/test_rule_logging.py`: f-string 로그 호출 수 래칫(AST 기준 127). 9d5690a(126) 이후 cdb3c09(129)에서 늘어난 것과 같은 증가를 막는다.
+- CLAUDE.md 에 "규칙과 강제 수단" 표를 두었다.
+
 ## 2026-11-11 — scratchpad 밖 임시 경로 쓰기 차단 훅 추가
 
 - [하네스] `.claude/hooks/block-tmp-writes.py` 를 `.claude/settings.local.json` 의 `PreToolUse`(Bash·Write·Edit·MultiEdit·NotebookEdit)에 등록했다. `/tmp`·`/private/tmp` 아래이면서 이 프로젝트 scratchpad 루트 밖인 경로에 쓰는 파일 도구 호출과 셸 쓰기(`>`, `>>`, `tee`, `touch`, `mkdir`, `cp`·`mv` 목적지, `-o`, `of=`, `open(..., 'w')`)를 막는다. 읽기와 정리용 `rm`, `/tmp` 에서 scratchpad 로 가져오는 복사는 허용한다.

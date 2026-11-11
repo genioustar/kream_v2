@@ -61,6 +61,17 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 - [ ] history.md 의 최신 항목이 실제 코드 상태와 일치하는가
 - [ ] history.md 에 SUPERSEDED 처리해야 할 뒤집힌 결정이 없는가
 
+## 규칙과 강제 수단
+반복된 실수는 문서가 아니라 검사로 막는다. 사용자가 같은 실수를 지적하면 고치고 이 표에 행을 더한다. 행이 이미 있는데 강제 수단이 없으면 반복이므로 같은 변경에서 검사를 만든다.
+
+| 규칙 | 강제 수단 | 근거가 된 실수 |
+|---|---|---|
+| 크롤러는 요청 실패를 삼키고 루프를 끝내 일부 결과를 반환하지 않는다 | `tests/test_rule_crawler_except.py`(except 안 break·CrawlBlockedError 삼킴 금지), 크롤러별 회귀 테스트 | 무신사 9d5690a `except ... break`, SSF void 태그·목록 영역 없음 |
+| ARCHITECTURE.md tests 트리와 SITE_DISCOUNT_RATES 표는 실제와 같다 | `tests/test_rule_docs_sync.py` | 묶음 1 트리 누락, c6cbde5 트리 누락, 아디다스 30% 표기 |
+| 로그는 lazy %-formatting | `tests/test_rule_logging.py`(f-string 로그 수 래칫, 기준 127) | 새 코드마다 f-string 로그 증가 |
+| 임시 파일은 scratchpad 안에만 쓴다 | `.claude/hooks/block-tmp-writes.py`(PreToolUse, Claude·Grok worker 공통), `tests/test_tmp_write_guard.py` | 잘못된 scratchpad 경로 쓰기 2회, worker 의 `/tmp` 파일 |
+| 브라우저 에러는 정해진 순서로 한 번만 대응한다 | `.claude/rules/browser-errors.md`(판단 영역이라 문서) | 차단 후 자동 재시도가 여러 번 SUPERSEDED |
+
 ## 크롤러 검증 시 ego-browser 활용 규칙
 
 크롤러 코드를 수정하면 글로벌 CLAUDE.md 의 Evaluator 단계에서 **ego-browser**(`/ego-browser`)로 대상 사이트의 실제 DOM을 읽어 크롤링 JSON과 교차 검증한다. Kasada·Akamai·Kream SPA 를 우회하려면 실렌더링 브라우저가 필수이므로 Firecrawl·Fetch 같은 정적 HTML MCP 는 사용 금지. 브라우저 에러 대응은 `.claude/rules/browser-errors.md` 를 따른다.

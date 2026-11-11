@@ -30,6 +30,9 @@ SITE_NAME = "ssfshop"
 MODEL_STRATEGY = "suffix_single"
 # 빈 목록이 이 페이지까지 나오지 않으면 잘린 결과를 성공으로 돌려주지 않는다.
 MAX_PAGES = 150
+# 목록 영역에 카드가 0개인 페이지로 끝나도, 이 수보다 적으면 중간 점검·차단 화면일 수 있어
+# 성공으로 돌려주지 않는다. 2026-11-11 실측 2,184개의 약 46%. 세일 규모가 크게 줄면 이 값을 내린다.
+MIN_PRODUCTS = 1000
 REQUEST_TIMEOUT_SEC = 20
 # 목록은 currentPage만 다른 서버 HTML이다. 다음 페이지를 요청하기 전에만 쉰다.
 PAGE_DELAY_MIN_SEC = 2.5
@@ -385,13 +388,14 @@ async def crawl_ssfshop() -> list[MarketplaceProduct]:
     config.SSFSHOP_SALE_URL 의 브랜드관 상품을 1페이지부터 수집한다.
 
     section#goods_container 가 있고 그 안의 god-item 이 0개면 종료한다.
+    그때 수집 수가 MIN_PRODUCTS 미만이면 RuntimeError 이며 일부 목록을 반환하지 않는다.
     컨테이너가 없거나, 두 번 열리거나, 컨테이너 안 section 이 있거나,
     짝 없는 section 끝·닫히지 않은 컨테이너·짝이 맞지 않는 태그는 예외로 올린다.
     중간 페이지 실패나 MAX_PAGES 도달 시 일부 목록을 반환하지 않고 예외를 전파한다.
 
     Returns:
         site_name='ssfshop' 인 MarketplaceProduct 리스트.
-        URL이 비어 있으면 즉시 [] 를 반환한다.
+        URL이 비어 있으면 하한 검사 없이 즉시 [] 를 반환한다.
     """
     sale_url = config.SSFSHOP_SALE_URL
     if not sale_url.strip():
@@ -448,6 +452,14 @@ async def crawl_ssfshop() -> list[MarketplaceProduct]:
                 f"SSF SHOP 페이지 상한({MAX_PAGES})에 도달했지만 상품 영역이 비어 있지 않습니다."
             )
         await pause(PAGE_DELAY_MIN_SEC, PAGE_DELAY_MAX_SEC, PAGE_DELAY_REASON)
+
+    if len(products) < MIN_PRODUCTS:
+        raise RuntimeError(
+            f"SSF SHOP 수집 {len(products)}개가 하한 {MIN_PRODUCTS}개보다 적습니다 "
+            f"(종료 페이지 {page}). "
+            "점검·차단 화면이거나 상품이 크게 줄었을 수 있음, "
+            "실제 감소면 MIN_PRODUCTS 를 내린다."
+        )
 
     logger.info("SSF SHOP 크롤링 완료 — 총 %s개", len(products))
     return products

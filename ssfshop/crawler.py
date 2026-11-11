@@ -99,6 +99,8 @@ class _GoodsListParser(HTMLParser):
         self._name_captures = 0
         self._price_captures = 0
         self._god_no = ""
+        # 닫힌 카드의 번호. 영역 안·카드 밖 오류는 열린 카드가 아니라 이 값을 가리킨다.
+        self._prev_god_no: str | None = None
         self._capture: str | None = None
         self._capture_level: int | None = None
         self._buffer: list[str] = []
@@ -116,7 +118,7 @@ class _GoodsListParser(HTMLParser):
         if tag == "section":
             raise RuntimeError(
                 "상품 목록 영역 안에 section 이 있습니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
         if tag not in HTML_VOID_ELEMENTS:
             self._stack.append(tag)
@@ -154,7 +156,7 @@ class _GoodsListParser(HTMLParser):
         if tag != open_tag:
             raise RuntimeError(
                 "상품 목록 컨테이너 안의 태그가 맞지 않습니다: "
-                f"열린 태그={open_tag}, 닫는 태그={tag}, godNo={self._god_no!r}"
+                f"열린 태그={open_tag}, 닫는 태그={tag}, {self._location()}"
             )
         if self._capture is not None and len(self._stack) == self._capture_level:
             self._finish_capture()
@@ -170,6 +172,7 @@ class _GoodsListParser(HTMLParser):
                     price_text="".join(self._price_parts),
                 )
             )
+            self._prev_god_no = self._god_no
             self._card_level = None
         self._stack.pop()
         if tag == "section":
@@ -191,7 +194,7 @@ class _GoodsListParser(HTMLParser):
         if count > MAX_CAPTURES_PER_CARD_FIELD:
             raise RuntimeError(
                 f"한 상품 카드에서 {label} 영역이 두 번 열렸습니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
         self._capture = field
         self._capture_level = len(self._stack)
@@ -211,12 +214,12 @@ class _GoodsListParser(HTMLParser):
         if self._stack:
             raise RuntimeError(
                 "상품 목록 영역이 이미 열려 있는데 다시 열렸습니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
         if self._container_seen:
             raise RuntimeError(
                 "상품 목록 영역이 이미 닫힌 뒤에 다시 열렸습니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
         self._container_seen = True
         self._section_depth += 1
@@ -227,9 +230,21 @@ class _GoodsListParser(HTMLParser):
         if self._section_depth == 0:
             raise RuntimeError(
                 "짝 없는 section 끝 태그입니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
         self._section_depth -= 1
+
+    def _location(self) -> str:
+        """오류가 난 자리. 영역 밖 오류에는 마지막으로 본 카드 번호를 붙이지 않는다."""
+        if not self._container_seen:
+            return "상품 목록 영역 앞"
+        if not self._stack:
+            return "상품 목록 영역 뒤"
+        if self._card_level is not None:
+            return f"카드 godNo={self._god_no!r}"
+        if self._prev_god_no is None:
+            return "상품 목록 영역 안(첫 카드 전)"
+        return f"상품 목록 영역 안(카드 밖), 직전 카드 godNo={self._prev_god_no!r}"
 
     def _raise_if_unclosed(self) -> None:
         """컨테이너가 없거나 닫히지 않으면 빈 목록으로 끝내지 않는다."""
@@ -240,7 +255,7 @@ class _GoodsListParser(HTMLParser):
         if self._stack:
             raise RuntimeError(
                 "상품 목록 컨테이너가 열렸지만 닫히지 않았습니다: "
-                f"godNo={self._god_no!r}"
+                + self._location()
             )
 
 
@@ -407,7 +422,7 @@ async def crawl_ssfshop() -> list[MarketplaceProduct]:
             logger.error("SSF SHOP 페이지 파싱 실패 (page=%s): %s", page, exc)
             raise
         if not cards:
-            logger.info("SSF SHOP page=%s 상품 영역 없음 → 종료", page)
+            logger.info("SSF SHOP page=%s 목록 영역에 카드 0개 → 종료", page)
             break
 
         added = 0

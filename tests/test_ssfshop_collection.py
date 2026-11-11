@@ -531,7 +531,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
             )
             for index in range(5)
         )
-        with self.assertRaisesRegex(RuntimeError, "G1"):
+        with self.assertRaisesRegex(RuntimeError, r"(?<!직전 )카드 godNo='G1'"):
             crawler._parse_cards(_page(cards))
 
     def test_second_name_or_price_span_raises(self):
@@ -607,7 +607,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         pause.assert_not_awaited()
 
     def test_missing_card_end_raises(self):
-        with self.assertRaisesRegex(RuntimeError, "GQDO2"):
+        with self.assertRaisesRegex(RuntimeError, r"(?<!직전 )카드 godNo='GQDO2'"):
             crawler._parse_cards(_unclosed_card_page())
 
     async def test_missing_card_end_on_first_page_raises_from_crawl(self):
@@ -615,7 +615,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
              patch.object(crawler, "_fetch_html_async", fetch), \
              patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
-            with self.assertRaisesRegex(RuntimeError, "GQDO2"):
+            with self.assertRaisesRegex(RuntimeError, r"(?<!직전 )카드 godNo='GQDO2'"):
                 await crawler.crawl_ssfshop()
         pause.assert_not_awaited()
 
@@ -667,7 +667,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         pause.assert_not_awaited()
 
     def test_unclosed_section_inside_container_raises(self):
-        with self.assertRaisesRegex(RuntimeError, "IN1"):
+        with self.assertRaisesRegex(RuntimeError, r"직전 카드 godNo='IN1'"):
             crawler._parse_cards(_unclosed_section_page())
 
     def test_stray_section_end_raises(self):
@@ -717,6 +717,123 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([card.god_no for card in cards], ["G1", "G2"])
         self.assertEqual(crawler._normalize_text(cards[0].name), "가젤 IE0420")
         self.assertEqual(crawler._sale_price(cards[0].price_text), 41720)
+
+    def test_stray_section_end_before_list_reports_front(self):
+        banner_god = "BANNERGOD9"
+        list_god = "LISTGOD9"
+        html = (
+            "<html><body>"
+            '<div class="banner-section">'
+            '<section class="marketing-banner">'
+            f'<li class="god-item" view-godno="{banner_god}">'
+            '<span class="name">배너 상품 AB1111</span>'
+            '<span class="price">판매가 1,000원</span>'
+            "</li></section>"
+            "</section>"
+            "</div>"
+            '<section id="goods_container"><ul>'
+            + _card(list_god, "가젤 IE0420", "149,000", "41,720")
+            + "</ul></section>"
+            "</body></html>"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertIn("상품 목록 영역 앞", message)
+        self.assertNotIn(banner_god, message)
+        self.assertNotIn(list_god, message)
+
+    def test_second_container_after_list_reports_back(self):
+        first = "AHEADGOD9"
+        second = "BEHINDGOD9"
+        html = (
+            "<html><body>"
+            '<section id="goods_container"><ul>'
+            + _card(first, "가젤 IE0420", "149,000", "41,720")
+            + "</ul></section>"
+            '<section id="goods_container"><ul>'
+            + _card(second, "삼바 ID0440", "139,000", "39,000")
+            + "</ul></section>"
+            "</body></html>"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertIn("상품 목록 영역 뒤", message)
+        self.assertNotIn(first, message)
+        self.assertNotIn(second, message)
+
+    def test_stray_section_end_after_list_reports_back(self):
+        kept = "KEPTGOD9"
+        html = (
+            "<html><body>"
+            '<section id="goods_container"><ul>'
+            + _card(kept, "가젤 IE0420", "149,000", "41,720")
+            + "</ul></section>"
+            "</section>"
+            "</body></html>"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertIn("상품 목록 영역 뒤", message)
+        self.assertNotIn(kept, message)
+
+    def test_tag_mismatch_inside_card_reports_that_card(self):
+        previous = "PREVGOD9"
+        inner = "INNERGOD9"
+        html = _page(
+            _card(previous, "가젤 IE0420", "149,000", "41,720")
+            + f'<li class="god-item" view-godno="{inner}">'
+            + '<span class="name">삼바 ID0440</span>'
+            + "</div>"
+            + '<span class="price">판매가 39,000원</span>'
+            + "</li>"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertRegex(message, rf"(?<!직전 )카드 godNo='{inner}'")
+        self.assertNotIn(previous, message)
+
+    def test_tag_mismatch_between_cards_reports_previous_card(self):
+        previous = "PREVGOD9"
+        nxt = "NEXTGOD9"
+        html = _page(
+            _card(previous, "가젤 IE0420", "149,000", "41,720")
+            + "</div>"
+            + _card(nxt, "삼바 ID0440", "139,000", "39,000")
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertIn(f"직전 카드 godNo='{previous}'", message)
+        self.assertNotIn(nxt, message)
+
+    def test_tag_mismatch_before_first_card_reports_before_cards(self):
+        first = "FIRSTGOD9"
+        html = (
+            '<section id="goods_container"></div><ul>'
+            + _card(first, "가젤 IE0420", "149,000", "41,720")
+            + "</ul></section>"
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            crawler._parse_cards(html)
+        message = str(caught.exception)
+        self.assertIn("상품 목록 영역 안(첫 카드 전)", message)
+        self.assertNotIn(first, message)
+
+    async def test_empty_container_log_says_zero_cards(self):
+        fetch = AsyncMock(return_value=_empty_page())
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "pause", new_callable=AsyncMock), \
+             self.assertLogs("ssfshop.crawler", level="INFO") as logs:
+            products = await crawler.crawl_ssfshop()
+        self.assertEqual(products, [])
+        text = "\n".join(logs.output)
+        self.assertIn("SSF SHOP page=1 목록 영역에 카드 0개 → 종료", text)
+        self.assertNotIn("상품 영역 없음", text)
 
     def test_div_container_is_not_the_list_area(self):
         html = (

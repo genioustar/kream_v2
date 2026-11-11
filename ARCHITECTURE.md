@@ -133,7 +133,7 @@ resell-sniper/
 ├── plans/                # 작업 계획 산출물
 ├── tests/
 │   ├── test_adidas_http.py       # HTTP 상태·재시도·진단·페이지 진행 회귀 테스트
-│   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락 예외·페이지 사이 요청 간격 회귀 테스트
+│   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락·반복 예외·브랜드 페이지 상한·페이지 사이 요청 간격 회귀 테스트
 │   ├── test_sequential_crawling.py # 순차 처리·휴식·접근 제한 중단 회귀 테스트
 │   ├── test_browser.py           # 독립 Chrome 실행·단일 탭·실패 정리 테스트
 │   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외 회귀 테스트
@@ -216,11 +216,12 @@ resell-sniper/
 - `_build_marketplace_products(...)` — 두 API의 공통 필드를 `slash_first` 모델 전략으로 변환하며 품절·모델코드 미추출 상품 제외.
 - `_to_marketplace_products(item, crawled_at)` / `_to_ranking_marketplace_products(item, crawled_at)` — 브랜드 PLP/랭킹 API 항목을 공통 변환기로 전달.
 - `_extract_ranking_items(data)` — 랭킹 API `MULTICOLUMN` 모듈의 `PRODUCT_COLUMN` 항목 평탄화.
-- `_crawl_brand_products(sale_url, crawled_at)` — 브랜드 PLP `pagination.nextPageUrl`의 `hmacId`를 따라 전체 페이지 수집.
+- `_crawl_brand_products(sale_url, crawled_at)` — 브랜드 PLP `pagination.nextPageUrl`의 `hmacId`를 따라 페이지를 수집한다. 안전 상한은 `MAX_BRAND_PAGES = 100`.
 - `_crawl_ranking_products(sale_url, crawled_at)` — 랭킹 API `link.next`를 따라 최대 20페이지 수집.
 - 수집 도중 요청이 실패하면 예외가 그대로 전파되며 부분 결과를 반환하지 않는다(403/429는 `CrawlBlockedError`로 파이프라인 중단, 그 외는 main이 경고 후 파일을 저장하지 않음). 랭킹의 API 항목 없음은 정상 종료로 그때까지 수집한 결과를 반환한다.
 - 브랜드 페이지네이션: 1페이지 응답의 `pagination.nextPageUrl`을 그대로 따라간다. 2페이지 이후 API는 `hmacId`가 필요하므로 page 번호를 직접 조립하지 않는다.
 - `pagination.hasNext`가 참인데 `nextPageUrl`이 비어 있으면(None, 빈 문자열) `RuntimeError`를 던지고 부분 결과를 반환하지 않는다. `hasNext`가 거짓이면 정상 종료한다.
+- 다음 주소가 반복되거나 `MAX_BRAND_PAGES`에 닿고도 `hasNext`면 예외, 부분 결과 미반환. 첫 요청 주소도 방문 집합에 들어간다. `hasNext`가 거짓이면 상한 페이지를 포함해 정상 종료한다.
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### ssfshop/crawler.py

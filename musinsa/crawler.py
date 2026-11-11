@@ -7,6 +7,8 @@ api2/dp/v2/plp/goods API로 상품을 페이지 단위 로드한다.
 첫 응답의 pagination.nextPageUrl에는 다음 페이지 접근에 필요한 hmacId가 포함되므로,
 page 번호를 직접 조립하지 않고 nextPageUrl을 그대로 따라간다.
 hasNext가 참인데 nextPageUrl이 비어 있으면 RuntimeError로 중단한다.
+다음 주소가 이미 방문한 주소이거나, hasNext가 참인 채 MAX_BRAND_PAGES에
+도달하면 RuntimeError로 중단하고 부분 결과를 반환하지 않는다.
 
 아울렛 랭킹 페이지는 client.musinsa.com의 ranking API를 사용하며,
 응답의 link.next를 따라 다음 순위를 수집한다.
@@ -36,6 +38,8 @@ BRAND_API_URL        = "https://api.musinsa.com/api2/dp/v2/plp/goods"
 RANKING_API_URL      = "https://client.musinsa.com/api/home/web/v5/pans/ranking"
 DEFAULT_PAGE_SIZE    = 100
 MAX_RANKING_PAGES    = 20
+# 페이지당 100개이므로 최대 1만 개. 현재 브랜드관 규모 대비 충분한 안전 상한.
+MAX_BRAND_PAGES      = 100
 REQUEST_TIMEOUT_SEC  = 20
 REQUEST_DELAY_SEC    = 3.0
 USER_AGENT           = (
@@ -252,9 +256,11 @@ async def _crawl_brand_products(
 
     products: list[MarketplaceProduct] = []
     seen_keys: set[tuple[str, str]] = set()
+    seen_page_urls: set[str] = set()
     page_num = 0
 
     while next_url:
+        seen_page_urls.add(next_url)
         page_num += 1
         try:
             data = await _fetch_json_async(next_url, referer)
@@ -288,6 +294,12 @@ async def _crawl_brand_products(
         next_url = pagination.get("nextPageUrl")
         if next_url is None or next_url == "":
             raise RuntimeError(f"무신사 다음 페이지 주소가 없습니다 (page={page_num})")
+        if next_url in seen_page_urls:
+            raise RuntimeError(f"무신사 다음 페이지 주소가 반복됩니다 (page={page_num})")
+        if page_num >= MAX_BRAND_PAGES:
+            raise RuntimeError(
+                f"무신사 브랜드 최대 페이지({MAX_BRAND_PAGES})에 도달했지만 다음 페이지가 있습니다 (page={page_num})"
+            )
         await asyncio.sleep(REQUEST_DELAY_SEC)
 
     logger.info(f"무신사 브랜드 크롤링 완료 — 총 {len(products)}개")
@@ -368,7 +380,8 @@ async def crawl_musinsa() -> list[MarketplaceProduct]:
     Raises:
         수집 도중 실패하면 예외가 전파되며 부분 결과를 반환하지 않는다.
         HTTP 403/429는 CrawlBlockedError로 전파된다.
-        브랜드 응답이 hasNext인데 nextPageUrl이 비어 있으면 RuntimeError로 전파된다.
+        브랜드 응답이 hasNext인데 nextPageUrl이 비어 있거나, 다음 주소가 반복되거나,
+        hasNext인 채 MAX_BRAND_PAGES에 도달하면 RuntimeError로 전파된다. 부분 결과는 반환하지 않는다.
     """
     sale_url = getattr(config, "MUSINSA_SALE_URL", "") or ""
     if not sale_url.strip():

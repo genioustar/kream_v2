@@ -2,7 +2,7 @@
 """
 PreToolUse 훅: 이 프로젝트의 scratchpad 루트 밖 임시 경로(/tmp, /private/tmp)에 쓰는 도구 호출을 막는다.
 
-Claude Code 와 Grok CLI(Orca worker) 가 같은 .claude/settings.local.json 훅을 읽으므로
+Claude Code 와 Grok CLI(Orca worker) 가 같은 .claude/settings.json 훅을 읽으므로
 두 도구의 입력 형식(file_path / path / target_notebook 등)을 모두 처리한다.
 읽기(ls, cat 등)와 정리용 rm 은 막지 않는다. 훅 자체 오류는 통과(fail open)시킨다.
 """

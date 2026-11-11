@@ -1,5 +1,14 @@
 # 변경 히스토리
 
+## 2026-11-11 — 공유 훅과 개인 Claude 설정 분리
+
+- [하네스] 훅(PreToolUse 임시 경로 차단, PostToolUse 커밋 후 push)을 추적되는 `.claude/settings.json` 으로 옮겼다. 권한 전체 허용·`dangerouslySkipPermissions`·모델 같은 개인 설정은 `.claude/settings.local.json` 에만 두고 git 추적에서 빼 `.gitignore` 에 넣었다. 저장소가 공개라서 개인 권한 설정이 노출되지 않게 하되, Orca worktree 는 커밋된 파일로 만들어지므로 훅은 계속 worker 에 적용되게 했다.
+  - SUPERSEDED: 훅과 개인 설정을 함께 `.claude/settings.local.json` 에 두고 추적 — 공개 저장소에 개인 권한 설정이 올라갔다. 과거 커밋에는 그 내용이 남아 있다.
+
+## 2026-11-11 — GitHub Actions 로 전체 테스트 실행
+
+- [CI] `.github/workflows/tests.yml`: main push 와 PR 에서 Python 3.14 로 `requirements.txt` 를 설치하고 로컬과 같은 `PYTHONPATH=. python -m unittest discover -s tests` 를 실행한다. 저장소 규칙 검사가 다른 기기나 에이전트의 push 에서도 돈다. 깨끗한 가상환경에서 커밋된 트리만으로 214개 통과를 먼저 확인했다.
+
 ## 2026-11-11 — 반복된 실수를 저장소 규칙 검사로 고정
 
 - [하네스] `tests/test_rule_crawler_except.py`: 크롤러 모듈의 except 가 raise 없이 break 하거나 CrawlBlockedError 를 삼키면 실패. 실제 과거 코드(9d5690a 무신사 250·307행)를 잡는 것을 확인했다.

@@ -15,6 +15,8 @@ SEARCH_URLS = [
     {
         "site_name": "loutique",
         "url": "https://smartstore.naver.com/loutique/search?q=%EB%94%94%EC%A0%A4&st=RELEVANCE&dt=IMAGE&page=1&size=80",
+        # 검색 URL 직접 이동은 로그인으로 리다이렉트된다. 공개 스토어 검색 UI를 이용한다.
+        "navigation": "store_search_ui",
         "type": "smart_store",
         "model_strategy": "suffix_grouped",
     },
@@ -51,19 +53,29 @@ SEARCH_URLS = [
 ]
 MIN_TRADE_COUNT = 100
 MIN_PRICE_DIFF = 5000
-KREAM_MAX_CONCURRENCY = 2
+# 브라우저 작업은 단일 탭·순차 실행으로 고정한다.
+SITE_DELAY_MIN_SEC = 1.0
+SITE_DELAY_MAX_SEC = 3.0
 OUTPUT_DIR = "output"
-#NIKE_SALE_URL = "https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok"
-#ADIDAS_SALE_URL = "https://www.adidas.co.kr/only_at_adidas"
-#SPECIAL_SALE_URL = "https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579"
+# 빈 문자열이면 해당 크롤러는 건너뛴다.
+# 예시: https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok
+NIKE_SALE_URL = ""
+# 공식 아울렛 전체보기. grid=true가 없으면 캠페인 화면으로 이동한다.
+# 예시: https://www.adidas.co.kr/outlet?grid=true
+ADIDAS_SALE_URL = ""
+# 예시: https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579
+SPECIAL_SALE_URL = ""
 SPECIAL_MODEL_STRATEGY = "auto"
-#MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+# SSF SHOP ADIDAS KOREA 브랜드관 전체 상품. 의류·잡화·신발을 URL 그대로 수집한다.
+SSFSHOP_SALE_URL = "https://www.ssfshop.com/ADIDAS-KOREA/main?dspCtgryNo=SFM&brandShopNo=BDMA29AKU&brndShopId=RTADA&currentPage=1&sortColumn=BEST_DC_SEQ&serviceType=DSP&ctgrySectCd=GNRL_CTGRY&fitPsbYn=N&subBrndCtgryGodYn=Y&cnrSn=23416&cnrSetSn=367764"
 
 # 사이트별 수동 할인율 (%) — Kream 외 크롤러에 적용. 0이면 sale_price 미산출.
 SITE_DISCOUNT_RATES = {
     "marketplace": 0,
-    "adidas": 0,
+    "adidas": 20,
     "musinsa": 0,
     "nike": 0,
     "special": 0,
+    "ssfshop": 0,
 }

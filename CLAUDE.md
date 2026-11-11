@@ -3,9 +3,8 @@
 ```bash
 # 의존성 설치 (최초 1회)
 pip install -r requirements.txt
-playwright install chromium
 
-# Chrome CDP 실행 (나이키·아디다스·special 크롤러 필수 — 별도 터미널)
+# ego lite를 설치해 둔다. 실행하면 독립 창이 자동으로 열린다.
 python chrome.py
 
 # 파이프라인 실행
@@ -62,24 +61,32 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 - [ ] history.md 의 최신 항목이 실제 코드 상태와 일치하는가
 - [ ] history.md 에 SUPERSEDED 처리해야 할 뒤집힌 결정이 없는가
 
-## 크롤러 검증 시 Playwright MCP 활용 규칙
+## 규칙과 강제 수단
+반복된 실수는 문서가 아니라 검사로 막는다. 아래 테스트는 로컬과 CI(`.github/workflows/tests.yml`, main push·PR)에서 같은 명령 `PYTHONPATH=. python -m unittest discover -s tests` 로 실행된다. 사용자가 같은 실수를 지적하면 고치고 이 표에 행을 더한다. 행이 이미 있는데 강제 수단이 없으면 반복이므로 같은 변경에서 검사를 만든다.
 
-크롤러 코드를 수정하면 글로벌 CLAUDE.md 의 Evaluator 단계에서 **Playwright MCP**로 대상 사이트의 실제 DOM을 읽어 크롤링 JSON과 교차 검증한다. Kasada·Akamai·Kream SPA 를 우회하려면 실렌더링 브라우저가 필수이므로 Firecrawl·Fetch 같은 정적 HTML MCP 는 사용 금지.
+| 규칙 | 강제 수단 | 근거가 된 실수 |
+|---|---|---|
+| 크롤러는 요청 실패를 삼키고 루프를 끝내 일부 결과를 반환하지 않는다 | `tests/test_rule_crawler_except.py`(except 안 break·CrawlBlockedError 삼킴 금지), 크롤러별 회귀 테스트 | 무신사 9d5690a `except ... break`, SSF void 태그·목록 영역 없음 |
+| ARCHITECTURE.md tests 트리와 SITE_DISCOUNT_RATES 표는 실제와 같다 | `tests/test_rule_docs_sync.py` | 묶음 1 트리 누락, c6cbde5 트리 누락, 아디다스 30% 표기 |
+| 로그는 lazy %-formatting | `tests/test_rule_logging.py`(f-string 로그 수 래칫, 기준 107) | 새 코드마다 f-string 로그 증가 |
+| 임시 파일은 scratchpad 안에만 쓴다 | `.claude/hooks/block-tmp-writes.py`(PreToolUse, Claude·Grok worker 공통), `tests/test_tmp_write_guard.py` | 잘못된 scratchpad 경로 쓰기 2회, worker 의 `/tmp` 파일 |
+| 브라우저 에러는 정해진 순서로 한 번만 대응한다 | `.claude/rules/browser-errors.md`(판단 영역이라 문서) | 차단 후 자동 재시도가 여러 번 SUPERSEDED |
 
-### 설치 (최초 1회, 사용자가 직접 실행)
-```
-claude mcp add playwright npx @playwright/mcp@latest
-```
-설치 후 `/mcp` 로 connected 상태 확인.
+## 크롤러 검증 시 ego-browser 활용 규칙
+
+크롤러 코드를 수정하면 글로벌 CLAUDE.md 의 Evaluator 단계에서 **ego-browser**(`/ego-browser`)로 대상 사이트의 실제 DOM을 읽어 크롤링 JSON과 교차 검증한다. Kasada·Akamai·Kream SPA 를 우회하려면 실렌더링 브라우저가 필수이므로 Firecrawl·Fetch 같은 정적 HTML MCP 는 사용 금지. 브라우저 에러 대응은 `.claude/rules/browser-errors.md` 를 따른다.
+
+### 사용 준비
+- 검증 전에 `ego-browser skill` 을 실행해 설치된 버전의 안내를 읽는다. 명령이 없으면 `/ego-browser` 스킬의 설치 안내를 따른다.
 
 ### 세션 공유 원칙
-- MCP 브라우저와 크롤러는 `chrome.py` 세션(포트 9222)을 **순차 공유**한다 (동시 사용 금지 — 포트 충돌·세션 오염).
+- 검증 브라우저도 확장 없이 독립 실행한다. 크롤러 종료 후 순차 검증하며 기존 Chrome 로그인은 공유하지 않는다.
 - 검증은 크롤러 실행이 **종료된 후** 시작한다.
 - 쿠키·fingerprint 오염을 줄이기 위해 **수정된 크롤러만** 대상으로 검증한다 (전체 사이트 일괄 검증 금지).
 
 ### 검증 절차 (Evaluator Agent 수행)
 1. 크롤러 JSON 로드: `output/YYYYMMDD/<site>_products.json`
-2. Playwright MCP 로 대상 URL 오픈:
+2. ego-browser 로 대상 URL 오픈 (TaskSpace 하나, 끝나면 `finish({ keep: [] })`):
    - nike: `config.NIKE_SALE_URL`
    - adidas: `config.ADIDAS_SALE_URL`
    - naver: `config.SEARCH_URLS[*].url`
@@ -100,7 +107,7 @@ claude mcp add playwright npx @playwright/mcp@latest
 ### 스킵 금지
 - 정적 HTML MCP(Fetch, Firecrawl)로 SPA·탐지 사이트를 검증하지 말 것
 - 검증 없이 "DOM 이 같을 것"이라 추정하지 말 것 (실측 필수)
-- 글로벌 규칙의 Evaluator 호출을 MCP 검증으로 대체하지 말 것 — MCP 검증은 Evaluator 가 사용하는 **도구**이지 Evaluator 역할 자체가 아니다
+- 글로벌 규칙의 Evaluator 호출을 ego-browser 검증으로 대체하지 말 것 — ego-browser 검증은 Evaluator 가 사용하는 **도구**이지 Evaluator 역할 자체가 아니다
 
 ## MD 파일 컨텍스트 최적화 원칙
 대화 세션 종료 전 또는 사용자가 요청 시, 아래 기준으로 md 파일을 정리할 것.

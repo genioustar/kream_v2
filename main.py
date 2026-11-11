@@ -16,20 +16,25 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import asdict
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 
 import config
+from common.atomic_io import write_json_atomic
 from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
 from kream.comparator import find_arbitrage
-from kream.crawler import DELAY_MAX_SEC, DELAY_MIN_SEC, init_kream_page, search_kream, _human_wait
+from kream.crawler import iter_kream_results
+from kream.history_marker import RESULT_FILENAME, load_previous_price_map, mark_result
+from common.pacing import CrawlBlockedError
 from musinsa.crawler import crawl_musinsa
 from naver.crawler import crawl_marketplace
+from ssfshop.crawler import crawl_ssfshop
 from nike.crawler import crawl_nike
 from special.crawler import crawl_special
 
@@ -38,9 +43,33 @@ FULL_CRAWL_DAYS: frozenset[int] = frozenset({1, 10, 20, 30})
 
 # Kream 청크 처리 설정
 KREAM_CHUNK_SIZE = 200           # 200개 초과 시 청크 분할
-KREAM_CHUNK_INTERVAL_SEC = 1800  # 청크 간 대기 시간 (30분)
 
 logger = get_logger("main")
+
+
+@dataclass(frozen=True)
+class SiteCrawler:
+    """STEP 1에 한 번만 등록하는 사이트.
+
+    key는 `{key}_products.json` 파일명과 SITE_DISCOUNT_RATES 키로 같이 쓴다.
+    required면 네이버처럼 실패 시 파이프라인을 멈추고, 아니면 선택 사이트다.
+    """
+
+    key: str
+    label: str
+    crawl: Callable[[], Awaitable[list[MarketplaceProduct]]]
+    required: bool
+
+
+# 실행 순서는 등록 순서다. 필수 사이트는 네이버(marketplace)뿐이다.
+SITE_CRAWLERS: tuple[SiteCrawler, ...] = (
+    SiteCrawler("marketplace", "네이버", crawl_marketplace, True),
+    SiteCrawler("adidas", "아디다스", crawl_adidas, False),
+    SiteCrawler("musinsa", "무신사", crawl_musinsa, False),
+    SiteCrawler("ssfshop", "SSF SHOP", crawl_ssfshop, False),
+    SiteCrawler("nike", "나이키", crawl_nike, False),
+    SiteCrawler("special", "special", crawl_special, False),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -49,10 +78,7 @@ logger = get_logger("main")
 
 def _save_json(data: list, path: Path) -> None:
     """데이터클래스 리스트를 JSON 파일로 저장한다."""
-    path.write_text(
-        json.dumps([asdict(item) for item in data], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(path, [asdict(item) for item in data])
 
 
 def _load_products_json(path: Path) -> list[MarketplaceProduct]:
@@ -83,6 +109,55 @@ def _apply_sale_price(products: list[MarketplaceProduct], source_key: str) -> No
         p.sale_price = int(round(p.price * (1 - rate / 100)))
 
 
+async def _crawl_site(site: SiteCrawler, output_dir: Path) -> None:
+    """오늘자 파일이 있으면 건너뛰고, 없으면 필수·선택 규칙으로 한 사이트를 수집한다."""
+    output = output_dir / f"{site.key}_products.json"
+    if output.exists():
+        logger.info("오늘자 파일 존재 — %s 크롤링 스킵: %s", site.label, output)
+        return
+    if site.required:
+        await _crawl_required_site(site, output)
+    else:
+        await _crawl_optional_site(site, output)
+
+
+async def _crawl_required_site(site: SiteCrawler, output: Path) -> None:
+    """네이버. 빈 결과도 저장하고, RuntimeError면 프로세스를 종료한다."""
+    logger.info("%s 크롤링 시작", site.label)
+    try:
+        products = await site.crawl()
+        _apply_sale_price(products, site.key)
+        _save_json(products, output)
+        logger.info("%s 상품 %s개 저장 → %s", site.label, len(products), output)
+    except RuntimeError as exc:
+        # CrawlBlockedError는 RuntimeError라 이 경로로 종료한다.
+        logger.error("%s 크롤링 전체 실패: %s", site.label, exc)
+        sys.exit(1)
+    except Exception as exc:
+        logger.error("%s_products.json 저장 실패: %s", site.key, exc)
+        raise
+
+
+async def _crawl_optional_site(site: SiteCrawler, output: Path) -> None:
+    """선택 사이트. 빈 결과는 저장하지 않고, 차단만 파이프라인을 멈춘다."""
+    logger.info("%s 크롤링 시작", site.label)
+    try:
+        products = await site.crawl()
+        if products:
+            _apply_sale_price(products, site.key)
+            _save_json(products, output)
+            logger.info("%s 상품 %s개 저장 → %s", site.label, len(products), output)
+        else:
+            logger.warning(
+                "%s 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)",
+                site.label,
+            )
+    except CrawlBlockedError:
+        raise
+    except Exception as exc:
+        logger.warning("%s 크롤링 실패 (파이프라인은 계속): %s", site.label, exc)
+
+
 def _extract_models_from_diff(diff_path: Path) -> list[str]:
     """diff 파일의 added/modified 항목에서 고유 model_name 목록을 순서대로 반환한다."""
     data = json.loads(diff_path.read_text(encoding="utf-8"))
@@ -95,27 +170,6 @@ def _extract_models_from_diff(diff_path: Path) -> list[str]:
             seen.add(mn)
             models.append(mn)
     return models
-
-
-# ---------------------------------------------------------------------------
-# Kream 페이지 풀 래퍼
-# ---------------------------------------------------------------------------
-
-async def _search_with_page_pool(
-    model_name: str,
-    page_pool: asyncio.Queue,
-) -> tuple[str, list]:
-    """
-    페이지 풀에서 페이지를 꺼내 검색하고 반환한다.
-    풀 크기(KREAM_MAX_CONCURRENCY)가 동시 요청 수를 자연스럽게 제한한다.
-    """
-    page = await page_pool.get()
-    try:
-        result = await search_kream(model_name, page)
-        await _human_wait(DELAY_MIN_SEC, DELAY_MAX_SEC)
-        return model_name, result
-    finally:
-        await page_pool.put(page)
 
 
 # ---------------------------------------------------------------------------
@@ -140,90 +194,8 @@ async def main(mode: str) -> None:
         logger.info("STEP 1: 사이트 크롤링")
         logger.info("=" * 60)
 
-        # 네이버 크롤링
-        marketplace_output = output_dir / "marketplace_products.json"
-        if marketplace_output.exists():
-            logger.info(f"오늘자 파일 존재 — 네이버 크롤링 스킵: {marketplace_output}")
-        else:
-            try:
-                marketplace_products = await crawl_marketplace()
-                _apply_sale_price(marketplace_products, "marketplace")
-                _save_json(marketplace_products, marketplace_output)
-                logger.info(f"네이버 상품 {len(marketplace_products)}개 저장 → {marketplace_output}")
-            except RuntimeError as exc:
-                logger.error(f"네이버 크롤링 전체 실패: {exc}")
-                sys.exit(1)
-            except Exception as exc:
-                logger.error(f"marketplace_products.json 저장 실패: {exc}")
-                raise
-
-        # 아디다스 크롤링
-        adidas_output = output_dir / "adidas_products.json"
-        if adidas_output.exists():
-            logger.info(f"오늘자 파일 존재 — 아디다스 크롤링 스킵: {adidas_output}")
-        else:
-            logger.info("아디다스 Extra Sale 크롤링 시작")
-            try:
-                adidas_products = await crawl_adidas()
-                if adidas_products:
-                    _apply_sale_price(adidas_products, "adidas")
-                    _save_json(adidas_products, adidas_output)
-                    logger.info(f"아디다스 상품 {len(adidas_products)}개 저장 → {adidas_output}")
-                else:
-                    logger.warning("아디다스 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except Exception as exc:
-                logger.warning(f"아디다스 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # 무신사 크롤링
-        musinsa_output = output_dir / "musinsa_products.json"
-        if musinsa_output.exists():
-            logger.info(f"오늘자 파일 존재 — 무신사 크롤링 스킵: {musinsa_output}")
-        else:
-            logger.info("무신사 상품 크롤링 시작")
-            try:
-                musinsa_products = await crawl_musinsa()
-                if musinsa_products:
-                    _apply_sale_price(musinsa_products, "musinsa")
-                    _save_json(musinsa_products, musinsa_output)
-                    logger.info(f"무신사 상품 {len(musinsa_products)}개 저장 → {musinsa_output}")
-                else:
-                    logger.warning("무신사 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except Exception as exc:
-                logger.warning(f"무신사 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # 나이키 크롤링
-        nike_output = output_dir / "nike_products.json"
-        if nike_output.exists():
-            logger.info(f"오늘자 파일 존재 — 나이키 크롤링 스킵: {nike_output}")
-        else:
-            logger.info("나이키 세일 신발 크롤링 시작")
-            try:
-                nike_products = await crawl_nike()
-                if nike_products:
-                    _apply_sale_price(nike_products, "nike")
-                    _save_json(nike_products, nike_output)
-                    logger.info(f"나이키 상품 {len(nike_products)}개 저장 → {nike_output}")
-                else:
-                    logger.warning("나이키 수집 결과 없음 — 파일 저장 생략 (다음 실행 시 재시도)")
-            except Exception as exc:
-                logger.warning(f"나이키 크롤링 실패 (파이프라인은 계속): {exc}")
-
-        # special 크롤링
-        special_output = output_dir / "special_products.json"
-        if special_output.exists():
-            logger.info(f"오늘자 파일 존재 — special 크롤링 스킵: {special_output}")
-        else:
-            logger.info("SPECIAL_SALE_URL 크롤링 시작")
-            try:
-                special_products = await crawl_special()
-                if special_products:
-                    _apply_sale_price(special_products, "special")
-                    _save_json(special_products, special_output)
-                    logger.info(f"special 상품 {len(special_products)}개 저장 → {special_output}")
-                else:
-                    logger.warning("special 수집 결과 없음 — 파일 저장 생략")
-            except Exception as exc:
-                logger.warning(f"special 크롤링 실패 (파이프라인은 계속): {exc}")
+        for site in SITE_CRAWLERS:
+            await _crawl_site(site, output_dir)
 
         if mode == "crawl":
             all_products = _load_all_products(output_dir)
@@ -236,7 +208,7 @@ async def main(mode: str) -> None:
     # STEP 2: Kream 검색 대상 로드 및 모델명 결정 (full / kream 모드)
     # =========================================================================
     logger.info("=" * 60)
-    logger.info(f"STEP 2: Kream 가격 비교 시작 (페이지 풀 {config.KREAM_MAX_CONCURRENCY}개)")
+    logger.info("STEP 2: Kream 가격 비교 시작 (단일 탭 순차 검색)")
     logger.info("=" * 60)
 
     # 오늘자 *_products.json 전체 로드
@@ -273,12 +245,7 @@ async def main(mode: str) -> None:
             if unique_models:
                 logger.info(f"diff 기반 — 변경된 모델명 {len(unique_models)}개")
             else:
-                logger.warning("diff에 변경 항목 없음 — 전체 모델명으로 폴백")
-                for p in all_products:
-                    mn = p.model_name.strip()
-                    if mn and mn not in seen:
-                        seen.add(mn)
-                        unique_models.append(mn)
+                logger.info("변경된 모델 없음 — Kream 검색 생략")
         else:
             logger.info("이전 날짜 데이터 없음 — 전체 모델명으로 폴백")
             for p in all_products:
@@ -286,6 +253,10 @@ async def main(mode: str) -> None:
                 if mn and mn not in seen:
                     seen.add(mn)
                     unique_models.append(mn)
+
+    if not unique_models:
+        logger.info("검색할 모델 없음 — 브라우저를 열지 않습니다.")
+        return
 
     # 200개 초과 시 청크 분할
     if len(unique_models) > KREAM_CHUNK_SIZE:
@@ -295,16 +266,16 @@ async def main(mode: str) -> None:
         ]
         logger.info(
             f"고유 모델명 {len(unique_models)}개 → "
-            f"{len(model_chunks)}개 청크로 분할 (청크당 최대 {KREAM_CHUNK_SIZE}개, "
-            f"청크 간 {KREAM_CHUNK_INTERVAL_SEC // 60}분 대기)"
+            f"{len(model_chunks)}개 청크로 분할 (청크당 최대 {KREAM_CHUNK_SIZE}개, 추가 휴식 없음)"
         )
     else:
         model_chunks = [unique_models]
-        logger.info(f"고유 모델명 {len(unique_models)}개 → Kream 검색 시작 (페이지 풀: {config.KREAM_MAX_CONCURRENCY}개)")
+        logger.info(f"고유 모델명 {len(unique_models)}개 → Kream 단일 탭 순차 검색 시작")
 
     arbitrage_results: list = []
     total_kream = 0
-    arb_output = output_dir / "arbitrage_results.json"
+    arb_output = output_dir / RESULT_FILENAME
+    previous_prices = load_previous_price_map(output_dir)
 
     for chunk_idx, chunk in enumerate(model_chunks):
         chunk_label = f"청크 [{chunk_idx + 1}/{len(model_chunks)}]"
@@ -314,33 +285,17 @@ async def main(mode: str) -> None:
 
         kream_products_map: dict = {}
 
-        async with create_browser(
-            headless=False,
-            channel="chrome",
-            use_native_fingerprint=True,
-        ) as context:
-            page_pool: asyncio.Queue = asyncio.Queue()
-            for i in range(config.KREAM_MAX_CONCURRENCY):
-                logger.info(f"페이지 풀 초기화 [{i+1}/{config.KREAM_MAX_CONCURRENCY}]")
-                page = await init_kream_page(context)
-                await page_pool.put(page)
-                if i < config.KREAM_MAX_CONCURRENCY - 1:
-                    await _human_wait(2.0, 4.0)
+        search_error = None
+        try:
+            async with create_browser() as context:
+                async for mn, products in iter_kream_results(chunk, context):
+                    kream_products_map[mn] = products
+        except Exception as exc:
+            search_error = exc
+            logger.error(f"{chunk_label} 검색 중단 — 완료 결과를 저장합니다: {exc}")
 
-            tasks = [
-                _search_with_page_pool(mn, page_pool)
-                for mn in chunk
-            ]
-            pair_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for idx, item in enumerate(pair_results):
-            if isinstance(item, Exception):
-                mn = chunk[idx]
-                logger.error(f"[{mn}] 예상치 못한 오류: {item}", exc_info=True)
-                kream_products_map[mn] = []
-            else:
-                mn, products = item
-                kream_products_map[mn] = products
+        if search_error is not None and not kream_products_map:
+            raise search_error
 
         chunk_kream = sum(len(v) for v in kream_products_map.values())
         total_kream += chunk_kream
@@ -357,24 +312,17 @@ async def main(mode: str) -> None:
             for item in arbitrage_results:
                 d = asdict(item)
                 d["price_diff"] = f"{d['price_diff']:,}"
-                arb_dicts.append(d)
-            arb_output.write_text(
-                json.dumps(arb_dicts, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+                arb_dicts.append(mark_result(d, previous_prices))
+            write_json_atomic(arb_output, arb_dicts)
             logger.info(
                 f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
             )
         except Exception as exc:
-            logger.error(f"arbitrage_results.json 저장 실패: {exc}")
+            logger.error(f"{RESULT_FILENAME} 저장 실패: {exc}")
             raise
 
-        # 마지막 청크가 아니면 30분 대기
-        if chunk_idx < len(model_chunks) - 1:
-            logger.info(
-                f"{chunk_label} 완료 — 다음 청크까지 {KREAM_CHUNK_INTERVAL_SEC // 60}분 대기..."
-            )
-            await asyncio.sleep(KREAM_CHUNK_INTERVAL_SEC)
+        if search_error is not None:
+            raise search_error
 
     # =========================================================================
     # STEP 4: 이전 날짜 대비 변경분 비교 (전체 크롤 날짜 / full 모드에만 실행)

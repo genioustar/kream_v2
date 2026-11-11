@@ -4,10 +4,10 @@ special/crawler.py
 상품 카드를 JS 휴리스틱으로 자동 탐지하여 MarketplaceProduct 목록을 반환한다.
 
 사전 준비:
-  chrome.py 로 Chrome CDP를 먼저 실행해야 한다.
+  ego lite를 설치한다.
 
 상품 수집 방식:
-  1. CDP로 실제 Chrome에 연결
+  1. 확장 없이 독립 Chrome 창 실행
   2. 페이지 로드 후 스크롤하며 JS 휴리스틱 3단계 전략으로 상품 카드 자동 탐지
   3. (URL, model_name) 키로 중복 제거하며 MarketplaceProduct 변환
 """
@@ -18,10 +18,9 @@ from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 
-from playwright.async_api import async_playwright
 
 import config
-from chrome import resolve_cdp_url
+from common.browser import create_browser
 from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
@@ -35,7 +34,7 @@ SITE_NAME             = "special"
 PAGE_LOAD_TIMEOUT_MS  = 60_000
 PAGE_SETTLE_SEC       = 3.0
 SCROLL_STEP_PX        = 800
-SCROLL_STEP_DELAY_MS  = 1_500
+SCROLL_STEP_DELAY_MS  = 3_500
 NO_CHANGE_LIMIT       = 5   # scrollY 변화 없음 N회 연속 시 종료
 
 # ---------------------------------------------------------------------------
@@ -195,12 +194,12 @@ async def crawl_special() -> list[MarketplaceProduct]:
     MarketplaceProduct 목록을 반환한다.
 
     미설정/빈 값이면 즉시 [] 반환 (크롤링 스킵).
-    CDP 연결 실패 시 [] 반환 + error 로그.
+    Chrome 실행 실패 시 오류를 전달한다.
 
     Returns:
         site_name='special' 인 MarketplaceProduct 리스트.
     """
-    special_url = getattr(config, "SPECIAL_SALE_URL", "") or ""
+    special_url = config.SPECIAL_SALE_URL
     if not special_url.strip():
         logger.info("config.SPECIAL_SALE_URL 미설정 — special 크롤링 건너뜀")
         return []
@@ -213,20 +212,7 @@ async def crawl_special() -> list[MarketplaceProduct]:
             f"지원하지 않는 SPECIAL_MODEL_STRATEGY: {model_strategy!r}"
         )
 
-    pw = await async_playwright().start()
-    try:
-        try:
-            cdp_url = resolve_cdp_url()
-            browser = await pw.chromium.connect_over_cdp(cdp_url)
-            logger.info(f"실제 Chrome CDP 연결 성공 ({cdp_url})")
-        except Exception as exc:
-            logger.error(
-                f"Chrome CDP 연결 실패: {exc}\n"
-                f"먼저 chrome.py를 실행해 Chrome CDP를 시작하세요."
-            )
-            return []
-
-        context = browser.contexts[0]
+    async with create_browser() as context:
         page = await context.new_page()
 
         try:
@@ -308,9 +294,6 @@ async def crawl_special() -> list[MarketplaceProduct]:
 
         finally:
             await page.close()
-
-    finally:
-        await pw.stop()
 
 
 # ---------------------------------------------------------------------------

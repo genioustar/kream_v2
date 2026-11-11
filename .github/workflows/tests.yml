@@ -1,0 +1,21 @@
+# 저장소 규칙 검사(tests/test_rule_*.py)와 회귀 테스트를 로컬과 같은 명령으로 실행한다.
+# 네트워크·브라우저를 쓰는 테스트는 없다(모두 가짜 응답 사용).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+      - name: 전체 테스트
+        run: PYTHONPATH=. python -m unittest discover -s tests

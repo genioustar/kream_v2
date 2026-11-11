@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+node_modules/
 
 # 크롤링 결과 (재생성 가능)
 output/
@@ -32,3 +33,6 @@ logs/
 
 # Graphify 생성물 (로컬에서 다시 만들 수 있음)
 graphify-out/
+
+# Claude 개인 설정(권한·모델). 공유 훅은 .claude/settings.json 에 둔다.
+.claude/settings.local.json

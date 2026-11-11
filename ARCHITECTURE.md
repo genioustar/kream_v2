@@ -68,6 +68,7 @@ resell-sniper/
 ├── diff_output.py        # 날짜별 JSON 변경분 비교 도구
 │
 ├── common/               # 공유 모듈
+│   ├── atomic_io.py      # write_json_atomic() — 같은 디렉터리 임시 파일로 JSON을 원자적으로 저장
 │   ├── browser.py        # create_browser() — ego lite Task Space 하나·작업 페이지 1개
 │   ├── ego_session.py    # EgoClient, EgoPage — ego-browser 로컬 포트 명령
 │   ├── pacing.py        # pause(), check_response(), CrawlBlockedError
@@ -133,6 +134,7 @@ resell-sniper/
 ├── logs/                 # 로그 파일
 ├── plans/                # 작업 계획 산출물
 ├── tests/
+│   ├── test_atomic_io.py         # JSON 원자적 쓰기: 내용·새 파일 권한·기존 권한 유지, 실패 시 기존 파일·임시 파일 정리, 부모 디렉터리 미생성
 │   ├── test_adidas_http.py       # HTTP 상태·재시도·진단·페이지 진행 회귀 테스트
 │   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락·반복 예외·브랜드 페이지 상한·페이지 사이 요청 간격 회귀 테스트
 │   ├── test_sequential_crawling.py # 순차 처리·휴식·접근 제한 중단 회귀 테스트
@@ -170,7 +172,12 @@ resell-sniper/
 - 검색할 모델이 없으면 브라우저를 열지 않는다. diff에 변경이 없으면 전체 모델 검색으로 폴백하지 않는다.
 - Kream 중단 시 완료된 모델의 차익 결과를 저장한 뒤 예외로 종료한다. 완료 모델이 하나도 없으면 기존 결과 파일을 덮어쓰지 않는다.
 - 청크 처리: 모델 수 > 200이면 200개씩 분할, 각 청크 완료 후 `arbitrage_results.json` 저장, 추가 휴식 없이 다음 청크 진행
+- `_save_json`과 차익 결과 저장은 `write_json_atomic`을 쓴다. 쓰기가 실패하면 기존 파일은 유지된다.
 - 청크 루프 전 `load_previous_price_map(output_dir)`를 1회 호출해 직전 결과를 로드하고, 저장 시 각 항목에 `mark_result()`로 표시를 붙인다.
+
+### common/atomic_io.py
+- `write_json_atomic(path, payload)` — `payload`를 `ensure_ascii=False`, `indent=2`, UTF-8 JSON으로 `path`에 쓴다. 임시 파일은 `path`와 같은 디렉터리(`TEMP_SUFFIX = ".tmp"`)에 만들고 성공 시 `replace`한다. 임시 파일은 0600으로 만들어지므로 replace 전에 권한을 맞춘다. 새 파일은 `DEFAULT_FILE_MODE`(0o666)에서 현재 umask를 뺀 값이고, 이미 있는 파일은 `stat.S_IMODE`로 기존 권한을 유지한다. 실패하면 임시 파일을 지우고 예외를 다시 던지며 기존 파일은 그대로 둔다. 부모 디렉터리는 만들지 않는다.
+- 호출: `main._save_json`, `main`의 차익 결과 저장, `diff_output.diff_date_pair`의 diff JSON 저장.
 
 ### common/browser.py
 - `create_browser()` — 사용자의 ego lite 안에서 Task Space `resell-sniper` 를 연다. 별도 프로필과 디버깅 포트로 브라우저를 띄우지 않는다.
@@ -335,7 +342,7 @@ resell-sniper/
 - `KEY_CONFIG` — 파일별 복합 비교 키 (명시 등록 파일)
 - `DEFAULT_PRODUCTS_KEY = ("model_name", "site_name")` — `*_products.json` 미등록 파일 자동 적용 (신규 소스 추가 시 별도 등록 불필요)
 - `compute_diff()` — added / modified 항목만 저장 (removed 제외)
-- `diff_date_pair()` — 두 날짜 디렉토리의 `*_products.json` 전체 비교
+- `diff_date_pair()` — 두 날짜 디렉토리의 `*_products.json` 전체 비교. diff JSON은 `write_json_atomic`으로 저장한다.
 
 ### config.py
 | 상수 | 기본값 | 설명 |

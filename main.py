@@ -21,6 +21,7 @@ from datetime import date
 from pathlib import Path
 
 import config
+from common.atomic_io import write_json_atomic
 from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
@@ -51,10 +52,7 @@ logger = get_logger("main")
 
 def _save_json(data: list, path: Path) -> None:
     """데이터클래스 리스트를 JSON 파일로 저장한다."""
-    path.write_text(
-        json.dumps([asdict(item) for item in data], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(path, [asdict(item) for item in data])
 
 
 def _load_products_json(path: Path) -> list[MarketplaceProduct]:
@@ -349,10 +347,7 @@ async def main(mode: str) -> None:
                 d = asdict(item)
                 d["price_diff"] = f"{d['price_diff']:,}"
                 arb_dicts.append(mark_result(d, previous_prices))
-            arb_output.write_text(
-                json.dumps(arb_dicts, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            write_json_atomic(arb_output, arb_dicts)
             logger.info(
                 f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
             )

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import config
+from common.atomic_io import write_json_atomic
 from common.logger import get_logger
 from common.models import FieldChange, ItemDiff
 
@@ -195,7 +196,7 @@ def diff_date_pair(
         }
         stem = Path(filename).stem
         out_path = diff_dir / f"{stem}_diff.json"
-        out_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(out_path, output)
         s = result["summary"]
         logger.info("[%s] 완료 — 추가: %d → %s", filename, s["added"], out_path)
         saved_paths.append(out_path)
@@ -228,10 +229,7 @@ def diff_date_pair(
 
         stem = Path(filename).stem
         out_path = diff_dir / f"{stem}_diff.json"
-        out_path.write_text(
-            json.dumps(output, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        write_json_atomic(out_path, output)
 
         s = result["summary"]
         logger.info(

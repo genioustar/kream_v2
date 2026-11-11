@@ -144,7 +144,8 @@ resell-sniper/
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
-│   └── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
+│   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
+│   └── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
 
 ├── requirements.txt
 └── venv/

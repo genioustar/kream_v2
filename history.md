@@ -1,5 +1,11 @@
 # 변경 히스토리
 
+## 2026-11-11 — scratchpad 밖 임시 경로 쓰기 차단 훅 추가
+
+- [하네스] `.claude/hooks/block-tmp-writes.py` 를 `.claude/settings.local.json` 의 `PreToolUse`(Bash·Write·Edit·MultiEdit·NotebookEdit)에 등록했다. `/tmp`·`/private/tmp` 아래이면서 이 프로젝트 scratchpad 루트 밖인 경로에 쓰는 파일 도구 호출과 셸 쓰기(`>`, `>>`, `tee`, `touch`, `mkdir`, `cp`·`mv` 목적지, `-o`, `of=`, `open(..., 'w')`)를 막는다. 읽기와 정리용 `rm`, `/tmp` 에서 scratchpad 로 가져오는 복사는 허용한다.
+- Grok CLI(Orca worker)도 같은 설정 파일의 훅을 읽는 것을 실험으로 확인했으므로, 훅 하나가 Claude 세션과 worker 양쪽에 적용된다. 계기는 잘못된 scratchpad 경로에 쓴 실수 2회와 worker 가 `/tmp` 에 남긴 파일들이다.
+- 한계: 셸 명령은 문자열 휴리스틱이라 `cd /tmp && echo > x` 같은 상대 경로 쓰기와 `$TMPDIR` 은 잡지 못한다.
+
 ## 2026-11-11 — SSF 파서 오류 메시지에 실제 위치 표시
 
 - [SSF SHOP] 목록 파서의 `RuntimeError`는 마지막으로 본 godNo 대신 오류가 난 자리를 메시지에 붙인다. 목록 영역 앞·뒤, 영역 안(첫 카드 전 또는 직전 카드), 카드 안(그 카드의 godNo)이다. 목록 영역이 없다는 메시지는 위치를 붙이지 않는다. 카드가 0개인 정상 종료 로그는 `목록 영역에 카드 0개`다.

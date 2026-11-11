@@ -199,6 +199,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         seen, urlopen = self._urlopen([html, _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -236,6 +237,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         _seen, urlopen = self._urlopen([_page(cards), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -257,6 +259,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         ]
         seen, urlopen = self._urlopen(pages)
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
             products = await crawler.crawl_ssfshop()
@@ -277,6 +280,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         card = _card("GQDO1", "가젤 IE0420", "149,000", "41,720")
         seen, urlopen = self._urlopen([_page(card), _page(card), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL_WITHOUT_PAGE), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -292,6 +296,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         html = _page(_card("GQDO1", "테스트 AA0001 BB0002", "80,000", "20,000"))
         _seen, urlopen = self._urlopen([html, _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -312,6 +317,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         _seen, urlopen = self._urlopen([_page(cards), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -351,6 +357,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         _seen, urlopen = self._urlopen([_page(cards), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -401,12 +408,90 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         urlopen.assert_not_called()
         pause.assert_not_awaited()
 
-    async def test_first_empty_page_returns_empty(self):
+    async def test_blank_sale_url_skips_floor_without_request(self):
+        fetch = AsyncMock()
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", ""), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
+             patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "urlopen") as urlopen, \
+             patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
+            self.assertEqual(await crawler.crawl_ssfshop(), [])
+        fetch.assert_not_awaited()
+        urlopen.assert_not_called()
+        pause.assert_not_awaited()
+
+    async def test_normal_end_below_floor_raises_without_returning(self):
+        fetch = AsyncMock(side_effect=[
+            _page(_card("GQDO1", "가젤 IE0420", "149,000", "41,720")),
+            _empty_page(),
+        ])
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "MIN_PRODUCTS", 2), \
+             patch.object(crawler, "pause", new_callable=AsyncMock):
+            with self.assertRaises(RuntimeError):
+                await crawler.crawl_ssfshop()
+        self.assertEqual(fetch.await_count, 2)
+
+    async def test_exact_floor_returns_products(self):
+        fetch = AsyncMock(side_effect=[
+            _page(
+                _card("GQDO1", "가젤 IE0420", "149,000", "41,720")
+                + _card("GQDO2", "삼바 ID0440", "139,000", "39,000")
+            ),
+            _empty_page(),
+        ])
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "MIN_PRODUCTS", 2), \
+             patch.object(crawler, "pause", new_callable=AsyncMock):
+            products = await crawler.crawl_ssfshop()
+        self.assertEqual([item.model_name for item in products], ["IE0420", "ID0440"])
+        self.assertEqual(len(products), 2)
+
+    async def test_below_floor_message_names_count_and_minimum(self):
+        cards = (
+            _card("GQDO1", "가젤 IE0420", "149,000", "41,720")
+            + _card("GQDO2", "삼바 ID0440", "139,000", "39,000")
+            + _card("GQDO3", "핸드볼 IF6561", "129,000", "36,000")
+        )
+        fetch = AsyncMock(side_effect=[_page(cards), _empty_page()])
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "MIN_PRODUCTS", 7), \
+             patch.object(crawler, "pause", new_callable=AsyncMock):
+            with self.assertRaises(RuntimeError) as caught:
+                await crawler.crawl_ssfshop()
+        message = str(caught.exception)
+        self.assertIn("수집 3개", message)
+        self.assertIn("하한 7개", message)
+        self.assertIn("종료 페이지 2", message)
+        self.assertIn("점검·차단 화면이거나 상품이 크게 줄었을 수 있음", message)
+        self.assertIn("실제 감소면 MIN_PRODUCTS 를 내린다", message)
+
+    async def test_first_empty_page_below_floor_raises(self):
         seen, urlopen = self._urlopen([
             _empty_page(_card("OUTSIDE", "바깥 ZZ9999", "10,000", "1")),
             _empty_page(),
         ])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "urlopen", urlopen), \
+             patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
+            with self.assertRaises(RuntimeError) as caught:
+                await crawler.crawl_ssfshop()
+        message = str(caught.exception)
+        self.assertIn("수집 0개", message)
+        self.assertIn("하한 1000개", message)
+        self.assertEqual(len(seen), 1)
+        pause.assert_not_awaited()
+
+    async def test_first_empty_page_returns_empty_when_floor_is_zero(self):
+        seen, urlopen = self._urlopen([
+            _empty_page(_card("OUTSIDE", "바깥 ZZ9999", "10,000", "1")),
+            _empty_page(),
+        ])
+        with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 0), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
             self.assertEqual(await crawler.crawl_ssfshop(), [])
@@ -421,6 +506,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         third = _card("GQDO3", "핸드볼 IF6561", "129,000", "36,000")
         _seen, urlopen = self._urlopen([_page(first + second + third), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -438,6 +524,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         _seen, urlopen = self._urlopen([_page(cards), _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -468,6 +555,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         )
         _seen, urlopen = self._urlopen([html, _empty_page()])
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "urlopen", urlopen), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
@@ -649,12 +737,13 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         fetch = AsyncMock(side_effect=pages)
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
              patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "MIN_PRODUCTS", 1), \
              patch.object(crawler, "pause", new_callable=AsyncMock):
             products = await crawler.crawl_ssfshop()
         self.assertEqual([item.model_name for item in products], ["IE0420"])
         self.assertEqual(fetch.await_count, 2)
 
-    async def test_first_page_empty_container_returns_empty(self):
+    async def test_first_page_empty_container_below_floor_raises(self):
         fetch = AsyncMock(side_effect=[
             _empty_page(_corner_card()),
             _page(_card("GQDO1", "가젤 IE0420", "149,000", "41,720")),
@@ -662,7 +751,9 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
              patch.object(crawler, "_fetch_html_async", fetch), \
              patch.object(crawler, "pause", new_callable=AsyncMock) as pause:
-            self.assertEqual(await crawler.crawl_ssfshop(), [])
+            with self.assertRaises(RuntimeError) as caught:
+                await crawler.crawl_ssfshop()
+        self.assertIn("수집 0개", str(caught.exception))
         self.assertEqual(fetch.await_count, 1)
         pause.assert_not_awaited()
 
@@ -827,6 +918,7 @@ class SsfshopCollectionTests(unittest.IsolatedAsyncioTestCase):
         fetch = AsyncMock(return_value=_empty_page())
         with patch.object(crawler.config, "SSFSHOP_SALE_URL", SALE_URL), \
              patch.object(crawler, "_fetch_html_async", fetch), \
+             patch.object(crawler, "MIN_PRODUCTS", 0), \
              patch.object(crawler, "pause", new_callable=AsyncMock), \
              self.assertLogs("ssfshop.crawler", level="INFO") as logs:
             products = await crawler.crawl_ssfshop()

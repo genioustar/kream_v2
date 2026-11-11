@@ -231,8 +231,8 @@ resell-sniper/
 
 ### ssfshop/crawler.py
 - `crawl_ssfshop()` — `config.SSFSHOP_SALE_URL`을 직접 읽어 ADIDAS KOREA 브랜드관 목록을 수집한다. URL이 비어 있으면 즉시 `[]`. 경로의 첫 세그먼트가 브랜드관 slug다. 단독 실행 진입점은 없다.
-- 순회: 쿼리의 `currentPage`는 무시하고 1페이지부터 덮어쓴다. 한 페이지의 상품 영역은 `<section id="goods_container">` 안의 `li.god-item`만이다. 컨테이너가 있고 카드가 0개면 종료한다. 컨테이너가 없으면 예외다. 페이지 요청 사이에만 `pause(2.5, 4.5, "SSF SHOP 다음 목록 페이지 요청 전 대기")`를 호출하고, 빈 페이지 뒤에는 쉬지 않는다. 안전 상한은 `MAX_PAGES = 150`.
-- 실패: `HTTPError`는 `check_response`로 넘긴다. 403/429는 `CrawlBlockedError`, 그 외 HTTP 오류·타임아웃은 그대로 전파한다. 중간 페이지 실패, 컨테이너가 없는 페이지, 상한까지 카드가 남아 있으면 일부 결과를 반환하지 않고 예외를 올린다. 첫 페이지 컨테이너가 있고 카드가 0개면 `[]`.
+- 순회: 쿼리의 `currentPage`는 무시하고 1페이지부터 덮어쓴다. 한 페이지의 상품 영역은 `<section id="goods_container">` 안의 `li.god-item`만이다. 컨테이너가 있고 카드가 0개면 종료한다. 컨테이너가 없으면 예외다. 페이지 요청 사이에만 `pause(2.5, 4.5, "SSF SHOP 다음 목록 페이지 요청 전 대기")`를 호출하고, 빈 페이지 뒤에는 쉬지 않는다. 안전 상한은 `MAX_PAGES = 150`. 정상 종료 후 수집 수가 `MIN_PRODUCTS`(1,000) 미만이면 `RuntimeError`이고 일부 결과를 반환하지 않는다.
+- 실패: `HTTPError`는 `check_response`로 넘긴다. 403/429는 `CrawlBlockedError`, 그 외 HTTP 오류·타임아웃은 그대로 전파한다. 중간 페이지 실패, 컨테이너가 없는 페이지, 상한까지 카드가 남아 있으면 일부 결과를 반환하지 않고 예외를 올린다. `SSFSHOP_SALE_URL`이 비어 있으면 하한 검사 전에 `[]`. 첫 페이지가 카드 0개로 끝나면 하한 미달로 예외다.
 - 가격: 카드 가격 칸의 `판매가` 숫자만 저장한다. 원가·할인율은 쓰지 않는다. 판매가에는 추가할인이 이미 반영되어 있고 `SITE_DISCOUNT_RATES["ssfshop"] = 0`이라 `sale_price`는 산출하지 않는다.
 - 카드 변환: 상품명은 공백을 정리한 `<span class="name">`이다. 모델코드는 `suffix_single`로 뽑는다. 모델코드가 여러 개 나오면 이름 끝의 마지막 하나만 쓴다. 상세 URL은 `https://www.ssfshop.com/{slug}/{godNo}/good`(`view-godno`, 추적 쿼리 없음). `(url, model_name)`으로 중복을 제거한다. 이름·판매가·모델코드·godNo가 없으면 debug 로그 후 건너뛴다.
 - 호출 경로: `_brand_slug`, `_page_url`, `_detail_url`, `_fetch_html`/`_fetch_html_async`, `_GoodsListParser`, `_open_container`, `_note_section_end`, `_location`, `_raise_if_unclosed`, `_parse_cards`, `_normalize_text`, `_products_from_card`, `_sale_price`.

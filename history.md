@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-11 — SSF 최소 상품 수 하한(1,000)
+
+- [SSF SHOP] 카드 0개 페이지로 순회가 끝난 뒤 수집 수가 `MIN_PRODUCTS`(1,000) 미만이면 `RuntimeError`를 올리고 결과를 반환하지 않는다. 2026-11-11 실측은 1~41페이지에 상품이 있고 42페이지에서 카드 0개로 끝나 2,184개(162초)였으며, 하한은 그 약 46%다. `SSFSHOP_SALE_URL`이 비어 있으면 하한 검사 없이 `[]`다.
+  - SUPERSEDED: 목록 영역에 카드 0개면 그때까지의 결과를 정상 완료로 반환 — 중간 점검 화면이면 일부만 저장됐다
+
 ## 2026-11-11 — 공유 훅과 개인 Claude 설정 분리
 
 - [하네스] 훅(PreToolUse 임시 경로 차단, PostToolUse 커밋 후 push)을 추적되는 `.claude/settings.json` 으로 옮겼다. 권한 전체 허용·`dangerouslySkipPermissions`·모델 같은 개인 설정은 `.claude/settings.local.json` 에만 두고 git 추적에서 빼 `.gitignore` 에 넣었다. 저장소가 공개라서 개인 권한 설정이 노출되지 않게 하되, Orca worktree 는 커밋된 파일로 만들어지므로 훅은 계속 worker 에 적용되게 했다.

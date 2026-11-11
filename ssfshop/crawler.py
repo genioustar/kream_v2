@@ -454,6 +454,12 @@ async def crawl_ssfshop() -> list[MarketplaceProduct]:
         await pause(PAGE_DELAY_MIN_SEC, PAGE_DELAY_MAX_SEC, PAGE_DELAY_REASON)
 
     if len(products) < MIN_PRODUCTS:
+        logger.error(
+            "SSF SHOP 수집 수 하한 미달: %s < %s (종료 페이지 %s)",
+            len(products),
+            MIN_PRODUCTS,
+            page,
+        )
         raise RuntimeError(
             f"SSF SHOP 수집 {len(products)}개가 하한 {MIN_PRODUCTS}개보다 적습니다 "
             f"(종료 페이지 {page}). "

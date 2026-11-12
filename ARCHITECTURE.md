@@ -71,7 +71,7 @@ resell-sniper/
 │   ├── browser.py        # create_browser() — ego lite Task Space 하나·작업 페이지 1개
 │   ├── ego_session.py    # EgoClient, EgoPage — ego-browser 로컬 포트 명령
 │   ├── pacing.py        # pause(), check_response(), CrawlBlockedError
-│   ├── logger.py         # get_logger()
+│   ├── logger.py         # setup_logging() — 루트 핸들러를 한 번만 붙인다
 │   ├── model_names.py    # 사이트 전략별 모델명 추출·오탐 필터
 │   └── models.py         # MarketplaceProduct, KreamProduct, ArbitrageResult, ItemDiff, FieldChange
 │
@@ -130,7 +130,7 @@ resell-sniper/
 │       ├── kream_cookies.json
 │       └── naver_cookies.json
 │
-├── logs/                 # 로그 파일
+├── logs/                 # setup_logging() 이 만드는 로그 파일
 ├── plans/                # 작업 계획 산출물
 ├── tests/
 │   ├── test_atomic_io.py         # JSON 원자적 쓰기: 내용·새 파일 권한·기존 권한 유지, 실패 시 기존 파일·임시 파일 정리, 부모 디렉터리 미생성
@@ -152,7 +152,8 @@ resell-sniper/
 │   ├── test_rule_atomic_write.py # 저장소 규칙: JSON 파일은 common/atomic_io.write_json_atomic 으로만 쓴다
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
 │   ├── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
-│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 호출 수가 기준선을 넘지 않음(새로 늘리면 실패)
+│   ├── test_logger.py            # setup_logging 포맷·멱등·DEBUG 파일/서드파티 INFO 필터·임시 로그 디렉터리·subprocess import 시 핸들러 0·mkdir 0회
+│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 래칫, setup_logging() 이 __main__ 첫 문장, PROJECT_LOGGERS 정합성, dictConfig·fileConfig 금지
 
 ├── requirements.txt
 └── venv/
@@ -168,6 +169,7 @@ resell-sniper/
 - `main(mode, site_keys=None)` — `force = mode == "crawl" and site_keys is not None`. 그 다음 `selected = _select_sites(site_keys if force else None)`으로 항상 고른다. crawl이 아니면 `site_keys`를 넘겨도 `None`으로 표 전체를 실행하고 재수집하지 않는다.
 - `_build_parser()` — `--mode`와 `--site`를 담은 ArgumentParser. `--site`의 choices는 `SITE_CRAWLERS`의 key다.
 - `parse_args(argv=None)` — `argv`가 없으면 `sys.argv`를 파싱한다. `--site`가 crawl이 아닌 모드와 함께 있으면 `parser.error`로 종료 코드 2다.
+- `__main__`은 `setup_logging()`을 한 번 호출한 뒤 `parse_args()`로 인자를 파싱한다. 로거 이름은 `"main"`이다.
 - `SiteCrawler` — frozen dataclass. `key`(파일명·`SITE_DISCOUNT_RATES` 키), `label`(로그 표시명), `crawl`(비동기 크롤러), `required`(필수 여부).
 - `SITE_CRAWLERS` — STEP 1 등록 표. 순서: marketplace(네이버, 필수), adidas, musinsa, ssfshop, nike, special. 키 집합은 `SITE_DISCOUNT_RATES`와 같다.
 - `_select_sites(site_keys)` — `None`이면 등록 표 전체. 키 목록이면 중복을 빼고 표 순서로 반환한다. `main`은 force일 때만 키 목록을 넘긴다.
@@ -206,8 +208,15 @@ resell-sniper/
 - `check_response(response)` — Kream 홈·상세 응답의 HTTP 403/429를 `CrawlBlockedError`로 전달한다. 네이버는 전용 진단 모듈로 처리한다.
 - `CrawlBlockedError` — 후속 요청과 자동 재시도를 중단할 접근 제한 예외.
 
+### common/logger.py
+- `LOG_FORMAT` — `[%(asctime)s] %(levelname)-8s %(name)s (%(filename)s:%(lineno)d) - %(message)s`. datefmt는 지정하지 않는다. 콘솔·파일 핸들러가 같은 Formatter를 쓴다.
+- `PROJECT_LOGGERS` — DEBUG로 둘 로거 이름. `main`, `chrome`, `diff_output`, `common`, `naver`, `kream`, `adidas`, `musinsa`, `nike`, `special`, `ssfshop`.
+- `setup_logging(log_dir=None)` — 루트 로거 레벨을 WARNING으로 두고 `PROJECT_LOGGERS`를 DEBUG로 둔다. 루트에 콘솔 핸들러(INFO)와 파일 핸들러(DEBUG, `logs/crawler_YYYYMMDD.log`, UTF-8)를 한 번만 붙인다. 이미 붙였으면 핸들러를 늘리지 않는다. `log_dir`이 없으면 저장소 `logs/`를 만들고, 있으면 그 디렉터리에 쓴다. `logs/`는 여기서만 만든다.
+- 호출: `main.py`, `chrome.py`, `diff_output.py`의 `__main__`에서 1회. 다른 모듈은 `logging.getLogger(__name__)`만 쓰고, 위 세 파일은 로거 이름을 `"main"`, `"chrome"`, `"diff_output"`으로 고정한다.
+
 ### chrome.py
 - `check_connection()` — Task Space 에서 `about:blank` 를 열고 `navigator.webdriver === true` 가 아닌지 확인한 뒤 그 Space 를 닫는다.
+- `__main__`은 `setup_logging()`을 한 번 호출한 뒤 `main()`을 실행한다. 로거 이름은 `"chrome"`이다.
 
 ### nike/crawler.py
 - `crawl_nike()` — 나이키 세일 신발 페이지 크롤링. **독립 Chrome 창 실행** (`create_browser()`). URL 출처: `config.NIKE_SALE_URL` 직접 읽기. 빈 문자열이면 비활성, 즉시 [] 반환. redirect 감지 키워드는 URL path 마지막 segment에서 자동 추출.
@@ -355,6 +364,7 @@ resell-sniper/
 - `DEFAULT_PRODUCTS_KEY = ("model_name", "site_name")` — `*_products.json` 미등록 파일 자동 적용 (신규 소스 추가 시 별도 등록 불필요)
 - `compute_diff()` — added / modified 항목만 저장 (removed 제외)
 - `diff_date_pair()` — 두 날짜 디렉토리의 `*_products.json` 전체 비교. diff JSON은 `write_json_atomic`으로 저장한다.
+- `__main__`은 `setup_logging()`을 한 번 호출한 뒤 `main()`을 실행한다. 로거 이름은 `"diff_output"`이다.
 
 ### config.py
 | 상수 | 기본값 | 설명 |

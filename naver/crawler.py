@@ -3,6 +3,7 @@ naver/crawler.py
 네이버 브랜드스토어 / 스마트스토어 상품 크롤러
 """
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,6 @@ from uuid import uuid4
 
 import config
 from common.browser import create_browser
-from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError, pause
@@ -19,7 +19,7 @@ from naver.diagnostics import NaverAccessError, NaverCollectionError, NaverDiagn
 from naver.parser import clean_url, get_selectors, page_origin, parse_price
 from naver.public_search import navigate_public_search
 
-logger = get_logger("naver.crawler")
+logger = logging.getLogger(__name__)
 
 # 스크롤 관련 상수
 SCROLL_PAUSE_MS = 3500       # 스크롤 후 대기 시간 (밀리초)

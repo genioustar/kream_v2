@@ -6,6 +6,7 @@ ADIDAS KOREA 브랜드관은 인증 없이 서버가 렌더한 HTML을 준다.
 currentPage 쿼리만 바꿔 다음 페이지를 받고, #goods_container 안의 카드만 수집한다.
 """
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,12 +16,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 import config
-from common.logger import get_logger
 from common.model_names import extract_model_names
 from common.models import MarketplaceProduct
 from common.pacing import check_response, pause
 
-logger = get_logger("ssfshop.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

@@ -9,10 +9,10 @@ kream/crawler.py
 - 차단 또는 검색 실패 시 후속 검색 중단 (자동 재시도 없음)
 """
 import asyncio
+import logging
 import random
 import time
 from urllib.parse import urlsplit
-from common.logger import get_logger
 from common.models import KreamProduct
 from common.pacing import CrawlBlockedError, check_response
 from kream.parser import (
@@ -23,7 +23,7 @@ from kream.parser import (
     parse_trade_count,
 )
 
-logger = get_logger("kream.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

@@ -5,6 +5,7 @@ Python 이 로컬 포트를 열고 ego-browser 가 그 포트로 접속한다.
 
 import asyncio
 import json
+import logging
 import re
 import shutil
 import socket
@@ -15,9 +16,7 @@ from pathlib import Path
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from common.logger import get_logger
-
-logger = get_logger("common.ego_session")
+logger = logging.getLogger(__name__)
 
 SPACE_NAME = "resell-sniper"
 _HOST_PATH = Path(__file__).resolve().parent.parent / "ego" / "space_host.mjs"

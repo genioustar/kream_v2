@@ -1,10 +1,9 @@
 """요청 사이 휴식과 차단 시 중단 정책."""
 import asyncio
+import logging
 import random
 
-from common.logger import get_logger
-
-logger = get_logger("common.pacing")
+logger = logging.getLogger(__name__)
 
 
 class CrawlBlockedError(RuntimeError):

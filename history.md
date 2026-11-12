@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-12 — 로깅 설정을 setup_logging() 한 곳으로
+
+- [로깅] 로깅 설정은 `setup_logging()` 한 곳, 엔트리포인트에서 1회 — 규칙 준수, import 부작용(logs/ 생성) 제거. 루트 레벨은 WARNING이고 프로젝트 로거(`PROJECT_LOGGERS`)만 DEBUG다. 콘솔 핸들러는 INFO, 파일 핸들러는 DEBUG이며 포맷 상수를 공유한다. `main.py`, `chrome.py`, `diff_output.py`의 `__main__`만 호출하고, 그 세 로거 이름은 `"main"`, `"chrome"`, `"diff_output"`으로 둔다.
+  - SUPERSEDED: 모듈마다 get_logger(name) 로 핸들러 부착 — import 만으로 logs/ 생성, 설정 분산
+
 ## 2026-11-12 — 남은 JSON 쓰기를 write_json_atomic으로 통합
 
 - [저장] `naver.checkpoint.save_checkpoint`, `naver.diagnostics.NaverDiagnostics._save`, `adidas.crawler._ResponseDiagnostics.save`가 `write_json_atomic`을 쓴다. 체크포인트는 부모 디렉터리를 만든 뒤 저장하고 경로를 반환하며 기존 파일 권한을 유지한다. 네이버 진단의 `OSError`는 경고와 `diagnostic_write_error`만 남긴다. 아디다스 진단 디렉터리는 저장 전에 만들고, 저장 예외는 바깥 `except`의 경고로 남긴다. 체크포인트의 직접 `NamedTemporaryFile` 쓰기와 진단의 고정 이름 `.tmp`는 제거했다.

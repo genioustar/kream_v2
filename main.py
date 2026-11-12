@@ -16,6 +16,7 @@ main.py
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -25,7 +26,7 @@ from pathlib import Path
 import config
 from common.atomic_io import write_json_atomic
 from common.browser import create_browser
-from common.logger import get_logger
+from common.logger import setup_logging
 from common.models import MarketplaceProduct
 from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
@@ -45,7 +46,8 @@ FULL_CRAWL_DAYS: frozenset[int] = frozenset({1, 10, 20, 30})
 # Kream 청크 처리 설정
 KREAM_CHUNK_SIZE = 200           # 200개 초과 시 청크 분할
 
-logger = get_logger("main")
+# 직접 실행하면 __name__ 이 "__main__" 이 되어 로거 이름이 "main" 이 아니고 DEBUG 목록에서도 빠진다.
+logger = logging.getLogger("main")
 
 
 @dataclass(frozen=True)
@@ -431,5 +433,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    setup_logging()
     args = parse_args()
     asyncio.run(main(args.mode, args.site))

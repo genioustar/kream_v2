@@ -9,14 +9,14 @@ kream/comparator.py
 
 이 모듈은 순수 동기 함수로만 구성되어 있으며, 비동기 크롤링은 포함하지 않는다.
 """
+import logging
 from datetime import datetime
 
 from config import MIN_PRICE_DIFF, MIN_TRADE_COUNT
-from common.logger import get_logger
 from common.models import ArbitrageResult, KreamProduct, MarketplaceProduct
 from kream.parser import model_numbers_match
 
-logger = get_logger("kream.comparator")
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

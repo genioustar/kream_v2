@@ -283,6 +283,7 @@ resell-sniper/
 - `extract_model_names(product_name, strategy)` — 괄호·슬래시·후행·본문 후보를 전략 순서대로 평가하고 복수 모델명을 반환.
 - 전략 선택: 괄호 중심 스토어는 `bracket_first`, 본문 마지막 `/ CODE`가 주류면 `slash_first`, 마지막 단일 코드는 `suffix_single`, 공백 복합 SKU는 `suffix_grouped`, 혼합 표기는 `auto`. 괄호 안 `/`는 복수 모델로 유지한다.
 - 공통 오탐 필터: 시즌·연도(`26SS`, `2026 FW`, `2026-27`), 수량·팩·설명(`3P`, `2way`), 용량·사이즈(`11L`, `230~250MM`), 성별·등급(`D`, `GS`), 독립 영문 색상명 제외.
+- `_drop_season_brand_tokens` — 단계 후보를 `_deduplicate`한 직후, `_SEASON_BRAND_RE`(숫자 2자리+대문자 1자+소문자 2자 이상, 그 외 문자 없음. 예: `26Paco`, `25Nike`) 토큰을 뺀다. 시즌 토큰이 없으면 후보를 그대로 둔다. strong 재판정(`_token_kind(..., allow_letter_hyphen=False) == "strong"`)은 시즌 토큰이 든 그룹에만 한다. 그 그룹은 토큰을 뺀 뒤 strong이 남으면 남은 부분을 남기고, 없으면 버린다. 시즌 토큰이 없는 그룹은 그대로 둔다. 결과가 비면 원래 후보를 유지한다. `26Paco 900`·`26Pa`·`OOAHH-BLACK`은 시즌 토큰이 아니거나 strong이 남지 않아 그대로다.
 - 문맥 허용: 5자리 이상 숫자-only 코드, 숫자 선두/하이픈 코드, 괄호 안 영문-only 하이픈 코드, `suffix_grouped`의 공백 복합 SKU 및 영문-only 중간 세그먼트.
 - 대문자/소문자는 판정 시에만 정규화하고 반환값은 원문을 보존한다.
 

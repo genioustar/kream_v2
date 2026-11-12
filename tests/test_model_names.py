@@ -2,7 +2,11 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import config
-from common.model_names import MODEL_STRATEGIES, extract_model_names
+from common.model_names import (
+    MODEL_STRATEGIES,
+    _drop_season_brand_tokens,
+    extract_model_names,
+)
 from musinsa.crawler import (
     _build_ranking_api_url,
     _crawl_ranking_products,
@@ -179,6 +183,111 @@ class ModelNameExtractionTests(unittest.TestCase):
     def test_unknown_strategy_is_rejected(self):
         with self.assertRaises(ValueError):
             extract_model_names("상품 ABC123", strategy="unknown")
+
+    def test_season_brand_token_is_dropped_when_another_code_exists(self):
+        cases = {
+            "26Paco JC1316 Header Basic Derby Shoes Cherry Black 59.5": ["JC1316"],
+            "25Paco JC2435 Slit Penny Loafer Brown 58.5": ["JC2435"],
+            "26Paco JC3304 Pawn Germany Millie Sneakers 58.5": ["JC3304"],
+            "25Paco JC2306 Bern Golf Penny Loafer 58.5": ["JC2306"],
+            "26Paco JC1301-1 Venice Ballon Derby shoes 58.5": ["JC1301-1"],
+        }
+        for strategy in ("slash_first", "auto", "suffix_single"):
+            for product_name, expected in cases.items():
+                with self.subTest(strategy=strategy, product_name=product_name):
+                    self.assertEqual(
+                        extract_model_names(product_name, strategy=strategy),
+                        expected,
+                    )
+
+    def test_lone_season_brand_token_is_kept(self):
+        for strategy in ("slash_first", "auto", "suffix_single"):
+            with self.subTest(strategy=strategy):
+                self.assertEqual(
+                    extract_model_names("26Paco", strategy=strategy),
+                    ["26Paco"],
+                )
+
+    def test_non_season_brand_codes_are_not_dropped(self):
+        kept_alone = {
+            "JC1316": ["JC1316"],
+            "DD1391-100": ["DD1391-100"],
+            "FZ5808": ["FZ5808"],
+            "2Y3456": ["2Y3456"],
+            "26PACO": ["26PACO"],
+        }
+        for strategy in ("slash_first", "auto", "suffix_single"):
+            for product_name, expected in kept_alone.items():
+                with self.subTest(strategy=strategy, product_name=product_name):
+                    self.assertEqual(
+                        extract_model_names(product_name, strategy=strategy),
+                        expected,
+                    )
+            with self.subTest(strategy=strategy, product_name="26PACO JC1316"):
+                result = extract_model_names(
+                    "26PACO JC1316 Header",
+                    strategy=strategy,
+                )
+                self.assertTrue(any("26PACO" in name for name in result))
+                self.assertTrue(any("JC1316" in name for name in result))
+                self.assertFalse(any(name == "26Paco" for name in result))
+
+    def test_weak_remainder_keeps_season_brand_group(self):
+        for strategy in ("auto", "suffix_grouped"):
+            with self.subTest(strategy=strategy):
+                self.assertEqual(
+                    extract_model_names("26Paco 900 신발", strategy=strategy),
+                    ["26Paco 900"],
+                )
+        self.assertEqual(
+            _drop_season_brand_tokens(["26Paco", "26Paco 900"]),
+            ["26Paco", "26Paco 900"],
+        )
+        self.assertNotEqual(
+            _drop_season_brand_tokens(["26Paco", "26Paco 900"]),
+            ["900"],
+        )
+
+    def test_hyphen_code_without_season_token_is_kept(self):
+        self.assertEqual(
+            extract_model_names(
+                "우포스 슬리퍼 (OOAHH-BLACK / OOAHH1234)",
+                strategy="bracket_first",
+            ),
+            ["OOAHH-BLACK", "OOAHH1234"],
+        )
+        for strategy in ("bracket_first", "auto"):
+            with self.subTest(strategy=strategy):
+                self.assertEqual(
+                    extract_model_names(
+                        "가방 (ABCDEF-GHI) (JC1316)",
+                        strategy=strategy,
+                    ),
+                    ["ABCDEF-GHI", "JC1316"],
+                )
+
+    def test_season_token_beside_hyphen_code_is_dropped(self):
+        self.assertEqual(
+            extract_model_names(
+                "가방 (SNOWPK-BAG / 26Paco)",
+                strategy="bracket_first",
+            ),
+            ["SNOWPK-BAG"],
+        )
+
+    def test_one_lowercase_brand_token_is_not_dropped(self):
+        expected = {
+            "slash_first": ["26Pa", "JC1316"],
+            "auto": ["26Pa JC1316"],
+            "suffix_single": ["26Pa", "JC1316"],
+            "suffix_grouped": ["26Pa JC1316"],
+        }
+        for strategy, names in expected.items():
+            with self.subTest(strategy=strategy):
+                self.assertEqual(
+                    extract_model_names("26Pa JC1316", strategy=strategy),
+                    names,
+                )
 
 
 class CrawlerIntegrationTests(unittest.TestCase):

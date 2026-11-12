@@ -1,5 +1,14 @@
 # 변경 히스토리
 
+## 2026-11-12 — 시스템 임시 디렉터리 쓰기를 TMPDIR 과 훅으로 막음
+
+- [하네스] `.claude/settings.json`의 `env.TMPDIR`은 `ALLOWED_ROOTS[0]`인 `/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/`다. settings env.TMPDIR 이 적용된 세션에서 Python tempfile 기본 경로는 scratchpad 루트로 간다. 훅은 `/var/folders`·`/private/var/folders` 쓰기와 명령의 `$TMPDIR`·`${TMPDIR}` 쓰기 대상을 막는다. 판정은 훅 프로세스의 `TMPDIR`을 인자로 받아, 그 값이 `ALLOWED_ROOTS` 안이면 `$TMPDIR` 쓰기를 허용한다. 읽기와 `rm`은 그대로 허용한다. 상대 경로 쓰기(`cd /tmp && echo > x`)는 여전히 문자열 휴리스틱 밖이다.
+  - SUPERSEDED: 셸의 `$TMPDIR` 쓰기는 훅이 잡지 못한다 — Claude Code의 `TMPDIR`이 `/var/folders`라 평가자 tempfile 기본값이 시스템 임시 디렉터리였다
+- [하네스] 훅 프로세스에 settings env 가 전달되는지는 미확인이다. 전달되지 않으면 `$TMPDIR` 쓰기가 오탐으로 차단될 수 있다.
+- [하네스] TMPDIR 루트가 없으면 Python tempfile 은 /tmp, BSD mktemp 는 /var/folders 로 경고 없이 대체한다. 루트 보장은 범위 밖이다.
+- [하네스] 따옴표로 감싼 `"$TMPDIR/x"` 는 기존 `"/tmp/a"` 와 같은 원인(`_writes_to` 의 `>\s*` 뒤 따옴표 미허용)으로 차단되지 않는다. `${TMPDIR:-...}` 같은 매개변수 확장은 `TMPDIR_REF_RE` 가 `$TMPDIR`·`${TMPDIR}` 만 인식해 차단되지 않는다. 둘 다 별도 작업이다.
+- [하네스] Grok worker는 `.claude/settings.json`의 `env`를 읽지 않을 수 있다. 그 경우 프로세스 안 tempfile 기본 경로는 이 설정만으로 바뀌지 않는다. 명령 문자열에 적힌 `/var/folders` 쓰기와, 훅 자신의 `TMPDIR`이 scratchpad 루트가 아닐 때의 `$TMPDIR` 쓰기는 훅이 막는다.
+
 ## 2026-11-12 — 로깅 설정을 setup_logging() 한 곳으로
 
 - [로깅] 로깅 설정은 `setup_logging()` 한 곳, 엔트리포인트에서 1회 — 규칙 준수, import 부작용(logs/ 생성) 제거. 루트 레벨은 WARNING이고 프로젝트 로거(`PROJECT_LOGGERS`)만 DEBUG다. 콘솔 핸들러는 INFO, 파일 핸들러는 DEBUG이며 포맷 상수를 공유한다. `main.py`, `chrome.py`, `diff_output.py`의 `__main__`만 호출하고, 그 세 로거 이름은 `"main"`, `"chrome"`, `"diff_output"`으로 둔다.

@@ -1,5 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "TMPDIR": "/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/"
+  },
   "hooks": {
     "PreToolUse": [
       {

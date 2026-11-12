@@ -72,7 +72,7 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 | 로그는 lazy %-formatting | `tests/test_rule_logging.py`(f-string 로그 수 래칫, 기준 107) | 새 코드마다 f-string 로그 증가 |
 | 로깅 설정은 setup_logging() 한 곳, 모듈은 getLogger(__name__) | `tests/test_rule_logging.py` | 모듈마다 get_logger 로 핸들러 부착 |
 | JSON 파일은 common/atomic_io.write_json_atomic 으로만 쓴다 | `tests/test_rule_atomic_write.py` | checkpoint·diagnostics·adidas 진단의 중복·비원자적 쓰기 |
-| 임시 파일은 scratchpad 안에만 쓴다 | `.claude/hooks/block-tmp-writes.py`(PreToolUse, Claude·Grok worker 공통), `tests/test_tmp_write_guard.py` | 잘못된 scratchpad 경로 쓰기 2회, worker 의 `/tmp` 파일 |
+| 임시 파일은 scratchpad 안에만 쓴다 | `.claude/hooks/block-tmp-writes.py`(PreToolUse, Claude·Grok worker 공통), `.claude/settings.json env.TMPDIR`, `tests/test_tmp_write_guard.py` | 잘못된 scratchpad 경로 쓰기 2회, worker 의 `/tmp` 파일, 평가자 tempfile 기본값 /var/folders 쓰기 |
 | 브라우저 에러는 정해진 순서로 한 번만 대응한다 | `.claude/rules/browser-errors.md`(판단 영역이라 문서) | 차단 후 자동 재시도가 여러 번 SUPERSEDED |
 
 ## 크롤러 검증 시 ego-browser 활용 규칙

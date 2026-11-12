@@ -2,10 +2,13 @@
 .claude/hooks/block-tmp-writes.py 회귀 테스트.
 
 훅을 실제 실행 파일로 돌려, Claude Code 와 Grok CLI 입력 형식 모두에서
-scratchpad 밖 임시 경로 쓰기만 막고 정상 작업은 통과시키는지 확인한다.
+scratchpad 밖 임시 경로(/tmp, /var/folders, 허용되지 않은 $TMPDIR) 쓰기만
+막고 정상 작업은 통과시키는지 확인한다.
 차단 사례 중 일부는 이 프로젝트 작업 중 실제로 일어난 실수다.
 """
+import importlib.util
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -16,8 +19,23 @@ SCRATCH = "/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/se
 HOOK_TIMEOUT_SEC = 10
 
 
-def run_hook(tool_name: str, tool_input: dict, grok_style: bool = False) -> dict | None:
-    """훅을 실행해 차단 응답(JSON)을 돌려준다. 통과면 None."""
+def load_hook():
+    """하이픈이 있는 훅 파일을 모듈로 불러 ALLOWED_ROOTS 를 읽는다."""
+    spec = importlib.util.spec_from_file_location("block_tmp_writes", HOOK)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"훅 모듈을 불러오지 못함: {HOOK}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_hook(
+    tool_name: str,
+    tool_input: dict,
+    grok_style: bool = False,
+    env: dict | None = None,
+) -> dict | None:
+    """훅을 실행해 차단 응답(JSON)을 돌려준다. 통과면 None. env 를 주면 그 환경을 쓴다."""
     if grok_style:
         payload = {"toolName": tool_name, "toolInput": tool_input, "toolInputTruncated": False}
     else:
@@ -28,6 +46,7 @@ def run_hook(tool_name: str, tool_input: dict, grok_style: bool = False) -> dict
         capture_output=True,
         text=True,
         timeout=HOOK_TIMEOUT_SEC,
+        env=env,
     )
     if result.returncode != 0:
         raise AssertionError(f"훅이 비정상 종료: {result.returncode} {result.stderr}")
@@ -128,6 +147,58 @@ class AllowedTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
+
+
+class SystemTempTests(unittest.TestCase):
+    """macOS tempfile 기본 경로(/var/folders)와 $TMPDIR 쓰기."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.hook = load_hook()
+
+    def test_write_tool_to_var_folders_denied(self):
+        for path in ("/var/folders/xx/T/a.json", "/private/var/folders/xx/T/a.json"):
+            with self.subTest(path=path):
+                reply = run_hook("Write", {"file_path": path})
+                self.assertTrue(is_denied(reply), path)
+
+    def test_shell_redirect_to_var_folders_denied(self):
+        reply = run_hook("Bash", {"command": "echo x > /var/folders/xx/T/a"})
+        self.assertTrue(is_denied(reply), reply)
+
+    def test_read_and_rm_in_var_folders_allowed(self):
+        for command in ("cat /var/folders/xx/T/a", "rm /var/folders/xx/T/a"):
+            with self.subTest(command=command):
+                reply = run_hook("Bash", {"command": command})
+                self.assertFalse(is_denied(reply), f"{command} -> {reply}")
+
+    def test_tmpdir_write_follows_hook_environ(self):
+        commands = ("echo x > $TMPDIR/a", "touch ${TMPDIR}/a")
+        denied_env = os.environ.copy()
+        denied_env["TMPDIR"] = "/var/folders/xx/T/"
+        allowed_env = os.environ.copy()
+        allowed_env["TMPDIR"] = self.hook.ALLOWED_ROOTS[0]
+        for command in commands:
+            with self.subTest(command=command, decision="deny"):
+                reply = run_hook("Bash", {"command": command}, env=denied_env)
+                self.assertTrue(is_denied(reply), f"차단되어야 함: {command} -> {reply}")
+            with self.subTest(command=command, decision="allow"):
+                reply = run_hook("Bash", {"command": command}, env=allowed_env)
+                self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
+
+    def test_tmpdir_old_name_is_allowed_when_hook_tmpdir_is_system(self):
+        # $TMPDIR_OLD 는 $TMPDIR 이 아니다. 부정 전방탐색이 없으면 접두로 오인한다.
+        env = os.environ.copy()
+        env["TMPDIR"] = "/var/folders/xx/T/"
+        for command in ("echo x > $TMPDIR_OLD/x", "touch $TMPDIR_OLD/x"):
+            with self.subTest(command=command):
+                reply = run_hook("Bash", {"command": command}, env=env)
+                self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
+
+    def test_settings_tmpdir_is_an_allowed_root(self):
+        settings_path = HOOK.parent.parent / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertIn(settings["env"]["TMPDIR"], self.hook.ALLOWED_ROOTS)
 
 
 if __name__ == "__main__":

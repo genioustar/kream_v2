@@ -9,7 +9,6 @@ import asyncio
 import json
 import random
 import re
-from dataclasses import asdict
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -336,26 +335,3 @@ async def crawl_adidas() -> list[MarketplaceProduct]:
 
     logger.info("아디다스 크롤링 완료 — 총 %s개", len(all_products))
     return all_products
-
-
-# ---------------------------------------------------------------------------
-# 단독 실행 진입점
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    async def _main():
-        products = await crawl_adidas()
-        if not products:
-            print("수집된 상품이 없습니다.")
-            return
-
-        today = date.today().strftime("%Y%m%d")
-        out_dir = Path(config.OUTPUT_DIR) / today
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "adidas_products.json"
-        out_path.write_text(
-            json.dumps([asdict(p) for p in products], ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"\n총 {len(products)}개 저장 → {out_path}")
-
-    asyncio.run(_main())

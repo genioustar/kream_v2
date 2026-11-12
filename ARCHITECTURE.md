@@ -10,10 +10,8 @@ python chrome.py              # 선택: ego lite Task Space 연결 점검
 python main.py                # 전체 파이프라인 (기본: full)
 python main.py --mode crawl   # 전체 크롤링 (Kream 제외)
 python main.py --mode kream   # Kream 검색만 (오늘자 *_products.json 사용)
-python -m adidas.crawler      # 아디다스 단독 크롤링
-python -m musinsa.crawler     # 무신사 단독 크롤링
-python -m nike.crawler        # 나이키 단독 크롤링
-python -m special.crawler     # special 단독 크롤링
+python main.py --mode crawl --site adidas          # 지정 사이트만 다시 수집
+python main.py --mode crawl --site nike musinsa    # 여러 사이트는 등록 표 순서
 ```
 ## 실행 흐름
 ```
@@ -32,7 +30,8 @@ main.py --mode full (기본)
   │     │     세일 신발 무한스크롤 수집, Kids/주니어 키워드 제외
   │     └── special/crawler.py → output/YYYYMMDD/special_products.json
   │           SPECIAL_SALE_URL JS 휴리스틱 자동 탐지 (빈 문자열이면 비활성, 스킵)
-  │     * `SITE_CRAWLERS` 순서. 오늘자 파일이 이미 있으면 스킵
+  │     * `SITE_CRAWLERS` 순서. `--site`가 없으면 오늘자 파일이 이미 있으면 스킵
+  │     * `--mode crawl --site`는 고른 키만, 오늘자 파일이 있어도 다시 수집해 덮어쓴다. 빈 결과면 기존 파일 유지(선택 사이트, 그리고 --site 재수집 시 네이버)
   │
   ├── STEP 2~3: Kream 검색 + 차익 비교 (청크 단위 처리)
   │     ├── 모델명 소스 결정
@@ -60,7 +59,7 @@ resell-sniper/
 ├── README.md             # 사용자용 실행 안내
 ├── history.md            # 주요 변경 결정 기록
 ├── .github/workflows/tests.yml # CI: main push·PR 에서 전체 unittest 실행(로컬과 같은 명령)
-├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream)
+├── main.py               # 파이프라인 진입점 (--mode crawl|full|kream, crawl 전용 --site)
 ├── chrome.py             # ego lite Task Space 에서 webdriver 표시 점검
 ├── ego/
 │   └── space_host.mjs    # Task Space 명령 루프
@@ -146,7 +145,7 @@ resell-sniper/
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
-│   ├── test_main_site_registry.py # STEP 1 사이트 등록 표: 키 일치·스킵·빈 결과·예외·할인율(네이버 포함)·ValueError 전파·호출 순서
+│   ├── test_main_site_registry.py # STEP 1 등록 표·--site 파싱·재수집·네이버 빈 결과 유지·full은 재수집 안 함·종료 코드·__main__ 제거
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
 │   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
@@ -161,13 +160,18 @@ resell-sniper/
 ## 주요 모듈 설명
 
 ### main.py
-- `--mode crawl` — STEP 1만 실행 (모든 사이트 크롤링 후 저장)
+- `--mode crawl` — STEP 1만 실행 (모든 사이트 크롤링 후 저장). `--site`가 없으면 오늘자 파일이 있는 사이트는 건너뛴다.
+- `--site KEY [KEY ...]` — crawl 전용. choices는 `SITE_CRAWLERS`의 key다. 고른 키만 등록 표 순서로 한 번씩 실행하고, 오늘자 파일이 있어도 다시 수집해 원자적으로 덮어쓴다. 중복 키는 한 번이다. 빈 결과면 기존 파일 유지(선택 사이트, 그리고 --site 재수집 시 네이버). full·kream과 함께 주면 `parser.error`로 종료 코드 2다.
 - `--mode full` — STEP 1~4 전체 실행 (기본값)
 - `--mode kream` — STEP 2~3만 실행 (오늘자 `*_products.json` 로드 후 Kream 검색)
+- `main(mode, site_keys=None)` — `force = mode == "crawl" and site_keys is not None`. 그 다음 `selected = _select_sites(site_keys if force else None)`으로 항상 고른다. crawl이 아니면 `site_keys`를 넘겨도 `None`으로 표 전체를 실행하고 재수집하지 않는다.
+- `_build_parser()` — `--mode`와 `--site`를 담은 ArgumentParser. `--site`의 choices는 `SITE_CRAWLERS`의 key다.
+- `parse_args(argv=None)` — `argv`가 없으면 `sys.argv`를 파싱한다. `--site`가 crawl이 아닌 모드와 함께 있으면 `parser.error`로 종료 코드 2다.
 - `SiteCrawler` — frozen dataclass. `key`(파일명·`SITE_DISCOUNT_RATES` 키), `label`(로그 표시명), `crawl`(비동기 크롤러), `required`(필수 여부).
 - `SITE_CRAWLERS` — STEP 1 등록 표. 순서: marketplace(네이버, 필수), adidas, musinsa, ssfshop, nike, special. 키 집합은 `SITE_DISCOUNT_RATES`와 같다.
-- `_crawl_site(site, output_dir)` — 오늘자 `{key}_products.json`이 있으면 크롤러를 호출하지 않는다. 없으면 `required`에 따라 아래 함수를 호출한다.
-- `_crawl_required_site(site, output)` — 시작 로그 후 수집한다. 빈 결과도 저장한다. `RuntimeError`는 오류 로그 후 `sys.exit(1)`. `CrawlBlockedError`는 `RuntimeError`의 서브클래스라 이 경로로 종료한다. 그 외 예외는 `{key}_products.json 저장 실패` 로그 후 다시 던진다.
+- `_select_sites(site_keys)` — `None`이면 등록 표 전체. 키 목록이면 중복을 빼고 표 순서로 반환한다. `main`은 force일 때만 키 목록을 넘긴다.
+- `_crawl_site(site, output_dir, *, force=False)` — `force`가 거짓이고 오늘자 `{key}_products.json`이 있으면 크롤러를 호출하지 않는다. `force`가 참이면 파일이 있어도 수집한다. 그 다음 `required`에 따라 아래 함수를 호출한다. `force`는 넘기지 않는다.
+- `_crawl_required_site(site, output)` — 시작 로그 후 수집한다. 결과가 비어 있고 오늘자 파일이 있으면(= `--site` 재수집) 덮어쓰지 않고 `기존 파일 유지` 경고를 남긴다. 파일이 없으면 빈 리스트도 저장한다. `force`가 아니면 오늘자 파일이 있을 때 `_crawl_site`가 먼저 스킵하므로 이 조건은 재수집에서만 만난다. `RuntimeError`는 오류 로그 후 `sys.exit(1)`. `CrawlBlockedError`는 `RuntimeError`의 서브클래스라 이 경로로 종료한다. 그 외 예외는 `{key}_products.json 저장 실패` 로그 후 다시 던진다.
 - `_crawl_optional_site(site, output)` — 시작 로그 후 수집한다. 빈 결과면 저장하지 않고 `(다음 실행 시 재시도)` 경고를 남긴다. `CrawlBlockedError`는 그대로 다시 던지고, 그 외 예외는 경고 후 다음 사이트로 넘어간다.
 - 시작 로그는 `"%s 크롤링 시작"`이다. 스킵·저장·실패 문구의 표시명은 `label`이다.
 - `_load_all_products(output_dir)` — 오늘자 디렉토리의 모든 `*_products.json` 자동 감지·합산 로드
@@ -244,7 +248,7 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### ssfshop/crawler.py
-- `crawl_ssfshop()` — `config.SSFSHOP_SALE_URL`을 직접 읽어 ADIDAS KOREA 브랜드관 목록을 수집한다. URL이 비어 있으면 즉시 `[]`. 경로의 첫 세그먼트가 브랜드관 slug다. 단독 실행 진입점은 없다.
+- `crawl_ssfshop()` — `config.SSFSHOP_SALE_URL`을 직접 읽어 ADIDAS KOREA 브랜드관 목록을 수집한다. URL이 비어 있으면 즉시 `[]`. 경로의 첫 세그먼트가 브랜드관 slug다.
 - 순회: 쿼리의 `currentPage`는 무시하고 1페이지부터 덮어쓴다. 한 페이지의 상품 영역은 `<section id="goods_container">` 안의 `li.god-item`만이다. 컨테이너가 있고 카드가 0개면 종료한다. 컨테이너가 없으면 예외다. 페이지 요청 사이에만 `pause(2.5, 4.5, "SSF SHOP 다음 목록 페이지 요청 전 대기")`를 호출하고, 빈 페이지 뒤에는 쉬지 않는다. 안전 상한은 `MAX_PAGES = 150`. 정상 종료 후 수집 수가 `MIN_PRODUCTS`(1,000) 미만이면 `RuntimeError`이고 일부 결과를 반환하지 않는다.
 - 실패: `HTTPError`는 `check_response`로 넘긴다. 403/429는 `CrawlBlockedError`, 그 외 HTTP 오류·타임아웃은 그대로 전파한다. 중간 페이지 실패, 컨테이너가 없는 페이지, 상한까지 카드가 남아 있으면 일부 결과를 반환하지 않고 예외를 올린다. `SSFSHOP_SALE_URL`이 비어 있으면 하한 검사 전에 `[]`. 첫 페이지가 카드 0개로 끝나면 하한 미달로 예외다.
 - 가격: 카드 가격 칸의 `판매가` 숫자만 저장한다. 원가·할인율은 쓰지 않는다. 판매가에는 추가할인이 이미 반영되어 있고 `SITE_DISCOUNT_RATES["ssfshop"] = 0`이라 `sale_price`는 산출하지 않는다.

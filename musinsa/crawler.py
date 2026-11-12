@@ -15,9 +15,7 @@ hasNext가 참인데 nextPageUrl이 비어 있으면 RuntimeError로 중단한�
 """
 import asyncio
 import json
-from dataclasses import asdict
-from datetime import date, datetime
-from pathlib import Path
+from datetime import datetime
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -399,26 +397,3 @@ async def crawl_musinsa() -> list[MarketplaceProduct]:
         f"/brand/{{slug}} 또는 /main/.../ranking URL을 사용하세요: {sale_url}"
     )
     return []
-
-
-# ---------------------------------------------------------------------------
-# 단독 실행 진입점
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    async def _main():
-        products = await crawl_musinsa()
-        if not products:
-            print("수집된 상품이 없습니다.")
-            return
-
-        today = date.today().strftime("%Y%m%d")
-        out_dir = Path(config.OUTPUT_DIR) / today
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "musinsa_products.json"
-        out_path.write_text(
-            json.dumps([asdict(p) for p in products], ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"\n총 {len(products)}개 저장 → {out_path}")
-
-    asyncio.run(_main())

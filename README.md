@@ -52,20 +52,12 @@ ego lite와 Python 의존성(`pip install -r requirements.txt`)만 필요합니�
 # 전체 파이프라인 (크롤링 + Kream 가격 비교)
 python main.py
 
-# 아디다스 단독 크롤링
-python -m adidas.crawler
-
-# 나이키 단독 크롤링
-python -m nike.crawler
-
-# 무신사 단독 크롤링
-python -m musinsa.crawler
-
-# special 단독 크롤링
-python -m special.crawler
-
 # 전체 크롤링만 (Kream 검색 없음)
 python main.py --mode crawl
+
+# 지정 사이트만 다시 수집 (오늘자 파일이 있어도 덮어씀)
+python main.py --mode crawl --site adidas
+python main.py --mode crawl --site adidas nike
 
 # Kream 검색만 (오늘자 *_products.json이 이미 있어야 함)
 python main.py --mode kream
@@ -78,10 +70,8 @@ python main.py --mode kream
 | `full`   | 설정된 전체 소스 크롤링 → Kream 가격 비교 → 차익 결과 저장               | 조건부          |
 | `crawl`  | 사이트 크롤링만 수행, `output/YYYYMMDD/*_products.json` 저장              | 조건부          |
 | `kream`  | 오늘자 `*_products.json`을 읽어 Kream 검색·비교만 수행                    | O               |
-| `adidas` | 아디다스 단독 크롤링                                                      | O               |
-| `musinsa` | 무신사 단독 크롤링                                                       | X               |
-| `nike`   | 나이키 단독 크롤링                                                        | O               |
-| `special` | special 단독 크롤링                                                      | O               |
+
+`--site`는 `--mode crawl`에서만 쓴다. 키는 `marketplace`, `adidas`, `musinsa`, `ssfshop`, `nike`, `special`이고, 여러 개를 주면 이 순서로 한 번씩 실행한다. 지정한 사이트는 오늘자 파일이 있어도 다시 수집해 덮어쓴다. 빈 결과면 기존 파일 유지(선택 사이트, 그리고 --site 재수집 시 네이버). `--mode full`이나 `--mode kream`과 함께 쓰면 오류로 끝난다. `marketplace`, `adidas`, `nike`, `special`은 브라우저가 필요하고 `musinsa`, `ssfshop`은 HTTP로 수집한다.
 
 `full`·`crawl`에서 소스 URL이 비어 있으면 해당 크롤러는 건너뜁니다.
 

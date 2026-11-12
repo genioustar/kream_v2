@@ -10,6 +10,7 @@ main.py
 실행 예시:
   python main.py                   # full (기본)
   python main.py --mode crawl
+  python main.py --mode crawl --site adidas
   python main.py --mode kream
 """
 import argparse
@@ -109,10 +110,22 @@ def _apply_sale_price(products: list[MarketplaceProduct], source_key: str) -> No
         p.sale_price = int(round(p.price * (1 - rate / 100)))
 
 
-async def _crawl_site(site: SiteCrawler, output_dir: Path) -> None:
-    """오늘자 파일이 있으면 건너뛰고, 없으면 필수·선택 규칙으로 한 사이트를 수집한다."""
+def _select_sites(site_keys: list[str] | None) -> tuple[SiteCrawler, ...]:
+    """None이면 등록 표 전체. 키 목록이면 중복을 빼고 표 순서로 고른다."""
+    if site_keys is None:
+        return SITE_CRAWLERS
+    wanted = set(site_keys)
+    return tuple(site for site in SITE_CRAWLERS if site.key in wanted)
+
+
+async def _crawl_site(site: SiteCrawler, output_dir: Path, *, force: bool = False) -> None:
+    """오늘자 파일이 있으면 건너뛰고, 없으면 필수·선택 규칙으로 한 사이트를 수집한다.
+
+    force면 오늘자 파일이 있어도 다시 수집한다. 빈 결과면 기존 파일 유지
+    (선택 사이트, 그리고 --site 재수집 시 네이버).
+    """
     output = output_dir / f"{site.key}_products.json"
-    if output.exists():
+    if output.exists() and not force:
         logger.info("오늘자 파일 존재 — %s 크롤링 스킵: %s", site.label, output)
         return
     if site.required:
@@ -122,10 +135,16 @@ async def _crawl_site(site: SiteCrawler, output_dir: Path) -> None:
 
 
 async def _crawl_required_site(site: SiteCrawler, output: Path) -> None:
-    """네이버. 빈 결과도 저장하고, RuntimeError면 프로세스를 종료한다."""
+    """네이버. 결과가 비어 있고 오늘자 파일이 있으면(= --site 재수집) 덮어쓰지 않는다.
+
+    파일이 없으면 빈 리스트도 저장한다. RuntimeError면 프로세스를 종료한다.
+    """
     logger.info("%s 크롤링 시작", site.label)
     try:
         products = await site.crawl()
+        if not products and output.exists():
+            logger.warning("%s 수집 결과 없음 — 기존 파일 유지: %s", site.label, output)
+            return
         _apply_sale_price(products, site.key)
         _save_json(products, output)
         logger.info("%s 상품 %s개 저장 → %s", site.label, len(products), output)
@@ -176,7 +195,7 @@ def _extract_models_from_diff(diff_path: Path) -> list[str]:
 # 메인 파이프라인
 # ---------------------------------------------------------------------------
 
-async def main(mode: str) -> None:
+async def main(mode: str, site_keys: list[str] | None = None) -> None:
     today = date.today().strftime("%Y%m%d")
     output_dir = Path(__file__).parent / config.OUTPUT_DIR / today
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -194,8 +213,16 @@ async def main(mode: str) -> None:
         logger.info("STEP 1: 사이트 크롤링")
         logger.info("=" * 60)
 
-        for site in SITE_CRAWLERS:
-            await _crawl_site(site, output_dir)
+        # crawl이 아니거나 --site가 없으면 None이라 표 전체다. 재수집은 crawl의 --site만.
+        force = mode == "crawl" and site_keys is not None
+        selected = _select_sites(site_keys if force else None)
+        if force:
+            logger.info(
+                "지정 사이트 재수집: %s",
+                ", ".join(site.key for site in selected),
+            )
+        for site in selected:
+            await _crawl_site(site, output_dir, force=force)
 
         if mode == "crawl":
             all_products = _load_all_products(output_dir)
@@ -361,7 +388,7 @@ async def main(mode: str) -> None:
 # CLI 진입점
 # ---------------------------------------------------------------------------
 
-def parse_args() -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="네이버 → Kream 차익 거래 탐색 파이프라인",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -369,7 +396,15 @@ def parse_args() -> argparse.Namespace:
             "모드 설명:\n"
             "  crawl  전체 사이트 크롤링만 실행 (Kream 검색 없음)\n"
             "  full   크롤링 + Kream 검색 전체 실행 (기본값)\n"
-            "  kream  Kream 검색만 실행 (오늘자 *_products.json 사용)"
+            "  kream  Kream 검색만 실행 (오늘자 *_products.json 사용)\n"
+            "\n"
+            "사이트 지정 (--site, crawl 전용):\n"
+            "  python main.py --mode crawl --site adidas\n"
+            "  python main.py --mode crawl --site adidas nike\n"
+            "  키는 등록 표 순서로 한 번씩 다시 수집한다.\n"
+            "  오늘자 파일이 있어도 덮어쓴다. "
+            "빈 결과면 기존 파일 유지(선택 사이트, 그리고 --site 재수집 시 네이버).\n"
+            "  full·kream 과 함께 쓰면 오류로 종료한다."
         ),
     )
     parser.add_argument(
@@ -378,9 +413,23 @@ def parse_args() -> argparse.Namespace:
         default="full",
         help="실행 모드 (기본값: full)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--site",
+        nargs="+",
+        choices=[site.key for site in SITE_CRAWLERS],
+        help="crawl 모드에서 다시 수집할 사이트 키 (중복은 한 번, 등록 표 순서)",
+    )
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.site and args.mode != "crawl":
+        parser.error("--site 는 --mode crawl 에서만 사용할 수 있습니다.")
+    return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(main(args.mode))
+    asyncio.run(main(args.mode, args.site))

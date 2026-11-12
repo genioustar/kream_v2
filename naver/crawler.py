@@ -570,31 +570,3 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
 
     logger.info(f"전체 수집 완료 - 총 {len(all_products)}개 상품")
     return all_products
-
-
-# ---------------------------------------------------------------------------
-# 단독 실행 진입점
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import json
-
-    async def main():
-        products = await crawl_marketplace()
-        out_dir = Path(config.OUTPUT_DIR)
-        out_dir.mkdir(exist_ok=True)
-        out_path = out_dir / f"marketplace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        data = [
-            {
-                "site_name": p.site_name,
-                "product_name": p.product_name,
-                "model_name": p.model_name,
-                "price": p.price,
-                "url": p.url,
-                "crawled_at": p.crawled_at,
-            }
-            for p in products
-        ]
-        out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"저장 완료: {out_path} ({len(products)}개)")
-
-    asyncio.run(main())

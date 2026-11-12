@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from adidas import crawler
+from common.atomic_io import TEMP_SUFFIX
 from common.pacing import CrawlBlockedError
 
 ADIDAS_TEST_SALE_URL = 'https://www.adidas.co.kr/outlet?grid=true'
@@ -82,14 +83,37 @@ class AdidasHttpTests(unittest.IsolatedAsyncioTestCase):
         page = MagicMock(url='https://www.adidas.co.kr/big_discount', title=AsyncMock(side_effect=RuntimeError('closed')))
         diagnostics = crawler._ResponseDiagnostics(page)
         diagnostics.on_response(response(404))
-        with tempfile.TemporaryDirectory() as directory, patch.object(crawler.config, 'OUTPUT_DIR', directory):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(crawler.config, 'OUTPUT_DIR', directory), \
+             patch.object(crawler, 'write_json_atomic', wraps=crawler.write_json_atomic) as writer:
             await diagnostics.save(RuntimeError('original error'))
             files = list(Path(directory).rglob('*.json'))
             self.assertEqual(len(files), 1)
+            self.assertEqual(writer.call_args.args[0], files[0])
             data = json.loads(files[0].read_text())
             self.assertEqual(data['responses'][0]['status'], 404)
             self.assertEqual(data['error'], 'original error')
             self.assertEqual(data['capture_error'], 'closed')
+            self.assertEqual(list(Path(directory).rglob(f'*{TEMP_SUFFIX}')), [])
+
+    async def test_diagnostic_write_error_is_only_a_warning(self):
+        page = MagicMock(url='https://www.adidas.co.kr/big_discount', title=AsyncMock(side_effect=RuntimeError('closed')))
+        diagnostics = crawler._ResponseDiagnostics(page)
+        original_replace = Path.replace
+
+        def fail_temp_replace(self_path, target):
+            if self_path.suffix == TEMP_SUFFIX:
+                raise OSError('replace failed')
+            return original_replace(self_path, target)
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(crawler.config, 'OUTPUT_DIR', directory), \
+             patch.object(Path, 'replace', fail_temp_replace), \
+             self.assertLogs('adidas.crawler', level='WARNING') as logs:
+            await diagnostics.save(RuntimeError('original error'))
+        self.assertIn('아디다스 진단 저장 실패', '\n'.join(logs.output))
+        self.assertEqual(list(Path(directory).rglob('*.json')), [])
+        self.assertEqual(list(Path(directory).rglob(f'*{TEMP_SUFFIX}')), [])
 
     async def test_crawl_does_not_turn_http_failure_into_empty_products(self):
         page = MagicMock(goto=AsyncMock(return_value=response(404)),

@@ -134,12 +134,12 @@ resell-sniper/
 ├── plans/                # 작업 계획 산출물
 ├── tests/
 │   ├── test_atomic_io.py         # JSON 원자적 쓰기: 내용·새 파일 권한·기존 권한 유지, 실패 시 기존 파일·임시 파일 정리, 부모 디렉터리 미생성
-│   ├── test_adidas_http.py       # HTTP 상태·재시도·진단·페이지 진행 회귀 테스트
+│   ├── test_adidas_http.py       # HTTP 상태·재시도·진단의 write_json_atomic 저장·페이지 진행 회귀 테스트
 │   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락·반복 예외·브랜드 페이지 상한·페이지 사이 요청 간격 회귀 테스트
 │   ├── test_sequential_crawling.py # 순차 처리·휴식·접근 제한 중단 회귀 테스트
 │   ├── test_browser.py           # 독립 Chrome 실행·단일 탭·실패 정리 테스트
-│   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외 회귀 테스트
-│   ├── test_naver_checkpoint.py  # 날짜/설정별 캐시·실패 후 재개 회귀 테스트
+│   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외·진단 저장 실패 회귀 테스트
+│   ├── test_naver_checkpoint.py  # 날짜/설정별 캐시·실패 후 재개·기존 파일 권한 회귀 테스트
 │   ├── test_naver_collection.py  # 파싱 실패·최종 보호 감지 시 완료 저장 방지, 상품 URL origin 회귀(카드별·일괄 경로)
 │   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
@@ -149,6 +149,7 @@ resell-sniper/
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
 │   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
+│   ├── test_rule_atomic_write.py # 저장소 규칙: JSON 파일은 common/atomic_io.write_json_atomic 으로만 쓴다
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
 │   ├── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
 │   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 호출 수가 기준선을 넘지 않음(새로 늘리면 실패)
@@ -188,7 +189,7 @@ resell-sniper/
 
 ### common/atomic_io.py
 - `write_json_atomic(path, payload)` — `payload`를 `ensure_ascii=False`, `indent=2`, UTF-8 JSON으로 `path`에 쓴다. 임시 파일은 `path`와 같은 디렉터리(`TEMP_SUFFIX = ".tmp"`)에 만들고 성공 시 `replace`한다. 임시 파일은 0600으로 만들어지므로 replace 전에 권한을 맞춘다. 새 파일은 `DEFAULT_FILE_MODE`(0o666)에서 현재 umask를 뺀 값이고, 이미 있는 파일은 `stat.S_IMODE`로 기존 권한을 유지한다. 실패하면 임시 파일을 지우고 예외를 다시 던지며 기존 파일은 그대로 둔다. 부모 디렉터리는 만들지 않는다.
-- 호출: `main._save_json`, `main`의 차익 결과 저장, `diff_output.diff_date_pair`의 diff JSON 저장.
+- 호출: `main._save_json`, `main`의 차익 결과 저장, `diff_output.diff_date_pair`의 diff JSON 저장, `naver.checkpoint.save_checkpoint`, `naver.diagnostics.NaverDiagnostics._save`, `adidas.crawler._ResponseDiagnostics.save`.
 
 ### common/browser.py
 - `create_browser()` — 사용자의 ego lite 안에서 Task Space `resell-sniper` 를 연다. 별도 프로필과 디버깅 포트로 브라우저를 띄우지 않는다.
@@ -261,7 +262,7 @@ resell-sniper/
 - `crawl_adidas()` — `config.ADIDAS_SALE_URL` 을 직접 읽어 세일 목록을 독립 Chrome에서 수집한다. 빈 문자열이면 비활성(`[]`), 접근·렌더링·페이지 진행 실패는 예외로 구분하며 부분 수집 결과를 반환하지 않는다. Kids와 중복 모델코드를 제외한다.
 - `_navigate(page, sale_url, diagnostics)` — 문서 응답 상태를 확인한다. 문서 429만 최대 2회 재시도하며 `_retry_delay(retry_after, attempt)`로 Retry-After 초/HTTP-date 또는 5·10초 대기를 적용한다. 서버 지정 대기가 `MAX_RETRY_WAIT_SEC=60`을 초과하면 일찍 재시도하지 않고 중단한다. `MAX_RATE_LIMIT_RETRIES=2`.
 - `_raise_http_error(status, url, retry_after)` — 상태별 안내를 포함한 예외. 403과 재시도 불가/소진 429는 `CrawlBlockedError`로 파이프라인에도 전파한다.
-- `_ResponseDiagnostics` — `on_response()`로 문서 상태와 document/XHR/fetch HTTP 오류를 기록한다. `check()`는 메인 문서 및 adidas.co.kr 하위 호스트의 `/api/` 상품·PLP·검색 경로 실패를 전달한다. 실측한 개별 상품 보조 경로 `/plp-app/api/product/{code}`와 장바구니·분석 요청은 진단 전용이며 목록 DOM으로 수집한다. `save(error)`는 실패 시 `output/YYYYMMDD/diagnostics/adidas_HHMMSS_ffffff.json`과 화면 PNG를 남긴다. URL·상태·Retry-After·본문 일부만 저장하며 쿠키/인증 헤더는 저장하지 않는다. 닫힌 페이지에서도 가능한 JSON 진단을 유지한다.
+- `_ResponseDiagnostics` — `on_response()`로 문서 상태와 document/XHR/fetch HTTP 오류를 기록한다. `check()`는 메인 문서 및 adidas.co.kr 하위 호스트의 `/api/` 상품·PLP·검색 경로 실패를 전달한다. 실측한 개별 상품 보조 경로 `/plp-app/api/product/{code}`와 장바구니·분석 요청은 진단 전용이며 목록 DOM으로 수집한다. `save(error)`는 진단 디렉터리를 만든 뒤 `write_json_atomic`으로 `output/YYYYMMDD/diagnostics/adidas_HHMMSS_ffffff.json`을 저장하고 화면 PNG를 남긴다. 저장 예외는 경고만 남긴다. URL·상태·Retry-After·본문 일부만 저장하며 쿠키/인증 헤더는 저장하지 않는다. 닫힌 페이지에서도 가능한 JSON 진단을 유지한다.
 - `_find_card_selector(page, diagnostics)` — `CARD_SELECTORS`를 공통 15초 한도에서 탐지한다. HTTP 오류를 중간 확인하며 카드가 없으면 수집 실패를 보고한다.
 - `_extract_products(page, card_selector, seen_codes)` — DOM 카드의 상품명·코드·세일가·Kids 여부를 추출한다. 상품명은 링크 경로를 디코딩하고 하이픈을 공백으로 바꾼다.
 - 다음 버튼이 없거나 비활성화면 종료한다. 필터 전 상품 링크 목록으로 동일 페이지 반복과 빈 페이지를 감지한다. 설정 URL과 다른 경로로 리다이렉트되면 실패로 처리한다.
@@ -298,12 +299,12 @@ resell-sniper/
 - `classify_access(...)` — 정확한 보호조치/로그인 URL 또는 화면의 강한 신호와 인증 쿠키 존재 여부로 접근 상태를 분류한다. 일반 로그인 링크는 신호로 사용하지 않는다.
 - `NaverAccessError` / `NaverCollectionError` — 진단 코드와 보고서 경로를 포함한 접근 제한/수집 실패 예외. 계정 보호는 `CrawlBlockedError` 계열로 자동 재시도하지 않는다.
 - `NaverDiagnostics` — 네이버 document/XHR/fetch의 요청·HTTP 상태·실패 수와 안전한 이벤트를 수집한다. 주 문서와 알려진 상품 목록 API의 403/429, 계정 보호는 중단 신호다. 로그인·보안 확인은 `pause_reason`만 남기고 수집을 유지한다. 인증 쿠키는 기록만 한다. 광고·개인화 보조 응답은 진단만 남긴다. `attach()`로 감시 시작, `check()`/`run()`으로 접근 상태를 점검하고 중단 신호면 작업을 취소, `finish()`로 결과 저장, `close()`로 리스너 정리.
-- 인증 쿠키는 존재 여부만 기록한다. 응답 본문·헤더·쿠키 값·입력값·페이지 제목·HTML·스크린샷은 저장하지 않는다. 진단은 `output/YYYYMMDD/diagnostics/naver_<run_id>_<site>.json`에 저장하며 저장 실패가 원래 제한 오류를 덮어쓰지 않는다. 내부 서버 판정 사유를 확정하는 기능은 아니다.
+- 인증 쿠키는 존재 여부만 기록한다. 응답 본문·헤더·쿠키 값·입력값·페이지 제목·HTML·스크린샷은 저장하지 않는다. 진단은 디렉터리를 만든 뒤 `write_json_atomic`으로 `output/YYYYMMDD/diagnostics/naver_<run_id>_<site>.json`에 저장한다. `OSError`는 경고와 `diagnostic_write_error`만 남기고 원래 제한 오류를 덮어쓰지 않는다. 내부 서버 판정 사유를 확정하는 기능은 아니다.
 
 ### naver/checkpoint.py
 - `CHECKPOINT_VERSION` — 완료 캐시 형식 버전. 현재 값은 2. 경로 해시(identity)와 저장 JSON의 `version`에 함께 기록한다. 상품 URL 생성 규칙처럼 저장 형식이 바뀌면 올려, 이전 형식의 같은 날 파일은 조회하지 않고 내용의 버전이 달라도 복원하지 않는다.
 - `load_checkpoint(site_info)` — 날짜와 URL(검색 조건 포함)·스토어명·타입·모델 추출 전략·접속 방식·`CHECKPOINT_VERSION`의 해시가 일치하는 완료 결과만 복원한다. 버전이 다르거나 손상·불완전·다른 날짜 상품·스키마 오류는 재사용하지 않는다.
-- `save_checkpoint(site_info, products)` — 정상 완료 결과를 `output/YYYYMMDD/checkpoints/naver/<hash>.json`에 `version=CHECKPOINT_VERSION`으로 원자적으로 저장한다. 최종 상품 파일과 분리하여 부분 결과가 Kream 입력으로 섞이지 않게 한다. 할인율은 기존 main.py 최종 저장 단계에서 적용한다.
+- `save_checkpoint(site_info, products)` — 부모 디렉터리를 만든 뒤 `write_json_atomic`으로 `output/YYYYMMDD/checkpoints/naver/<hash>.json`에 `version=CHECKPOINT_VERSION`을 저장하고 그 경로를 반환한다. 이미 있는 파일의 권한은 유지한다. 최종 상품 파일과 분리하여 부분 결과가 Kream 입력으로 섞이지 않게 한다. 할인율은 기존 main.py 최종 저장 단계에서 적용한다.
 
 ### naver/public_search.py
 - `navigate_public_search(page, url, diagnostics, timeout_ms)` — 공개 홈에서 검색창을 열고 설정 URL의 검색어와 페이지 크기를 UI로 적용한다. 정확도순·이미지형·첫 페이지와 지원 페이지 크기만 허용하고, 검색 결과 제목·최종 URL·총수·카드 수를 검증한다. 홈 문서가 로그인 페이지로 떨어지면 중단하지 않고 Enter를 기다린 뒤 홈 이동을 다시 한다. 비공개 API 호출은 하지 않는다.

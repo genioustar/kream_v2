@@ -1,7 +1,6 @@
 """네이버 접근 상태를 분류하고 개인정보 없는 실행 진단을 저장한다."""
 import asyncio
 import inspect
-import json
 import re
 import time
 from collections import Counter
@@ -10,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from common.atomic_io import write_json_atomic
 from common.logger import get_logger
 from common.pacing import CrawlBlockedError
 
@@ -150,9 +150,7 @@ class NaverDiagnostics:
         self.data["collection_http_error_counts"] = dict(self._collection_http_errors)
         try:
             self.report_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.report_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(self.report_path)
+            write_json_atomic(self.report_path, self.data)
         except OSError as exc:
             error_class = type(exc).__name__
             if self.data.get("diagnostic_write_error") != error_class:

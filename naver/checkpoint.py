@@ -4,9 +4,9 @@ import json
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import config
+from common.atomic_io import write_json_atomic
 from common.logger import get_logger
 from common.models import MarketplaceProduct
 
@@ -65,13 +65,5 @@ def save_checkpoint(site_info: dict, products: list[MarketplaceProduct]) -> Path
     path = _checkpoint_path(site_info)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"version": CHECKPOINT_VERSION, "status": "complete", "products": [asdict(product) for product in products]}
-    temporary = None
-    try:
-        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as handle:
-            temporary = Path(handle.name)
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-        temporary.replace(path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    write_json_atomic(path, data)
     return path

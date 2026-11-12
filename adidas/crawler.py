@@ -6,7 +6,6 @@ adidas/crawler.py
 사전 준비: ego lite 설치.
 """
 import asyncio
-import json
 import random
 import re
 from datetime import date, datetime, timezone
@@ -17,6 +16,7 @@ from urllib.parse import urlparse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import config
+from common.atomic_io import write_json_atomic
 from common.browser import create_browser
 from common.logger import get_logger
 from common.models import MarketplaceProduct
@@ -183,7 +183,7 @@ class _ResponseDiagnostics:
                 await self.page.screenshot(path=str(prefix.with_suffix(".png")), timeout=5000)
             except Exception as exc:
                 data["capture_error"] = str(exc)
-            prefix.with_suffix(".json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_json_atomic(prefix.with_suffix(".json"), data)
             logger.error("아디다스 실패 진단 저장: %s.json", prefix)
         except Exception as exc:
             logger.warning("아디다스 진단 저장 실패: %s", exc)

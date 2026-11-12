@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-12 — 남은 JSON 쓰기를 write_json_atomic으로 통합
+
+- [저장] `naver.checkpoint.save_checkpoint`, `naver.diagnostics.NaverDiagnostics._save`, `adidas.crawler._ResponseDiagnostics.save`가 `write_json_atomic`을 쓴다. 체크포인트는 부모 디렉터리를 만든 뒤 저장하고 경로를 반환하며 기존 파일 권한을 유지한다. 네이버 진단의 `OSError`는 경고와 `diagnostic_write_error`만 남긴다. 아디다스 진단 디렉터리는 저장 전에 만들고, 저장 예외는 바깥 `except`의 경고로 남긴다. 체크포인트의 직접 `NamedTemporaryFile` 쓰기와 진단의 고정 이름 `.tmp`는 제거했다.
+- [하네스] `tests/test_rule_atomic_write.py`가 제품 코드(venv, tests, .claude 제외)를 AST로 훑어 `json.dump(`와 `.write_text(json.dumps(...))`가 `common/atomic_io.py` 밖에 0개인지 검사한다. `json.dumps` 단독 호출은 허용한다.
+
 ## 2026-11-12 — --site 재수집의 네이버 빈 결과는 기존 파일 유지
 
 - [main] `--site`로 네이버를 다시 수집해 결과가 0개이고 오늘자 파일이 있으면 덮어쓰지 않고 `기존 파일 유지`를 경고한다. `_crawl_required_site`는 `force` 인자 없이 `not products and output.exists()`만 본다. `force`가 아니면 `_crawl_site`가 오늘자 파일을 이미 스킵하므로 동작이 같다. 파일이 없으면 빈 리스트를 저장한다. `RuntimeError`는 `sys.exit(1)`, 그 외 예외는 다시 던진다. `main('full', site_keys)`는 키를 무시하고 표 전체를 기존 스킵 규칙으로 돈다. `main`은 `force = mode == "crawl" and site_keys is not None`일 때만 키를 `_select_sites`에 넘긴다.

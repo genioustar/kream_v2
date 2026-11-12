@@ -3,14 +3,21 @@
 PreToolUse 훅: scratchpad 루트 밖 임시 경로에 쓰는 도구 호출을 막는다.
 
 대상은 /tmp·/private/tmp, macOS 시스템 임시 경로(/var/folders·/private/var/folders),
-그리고 명령 문자열의 $TMPDIR·${TMPDIR} 이다. $TMPDIR 은 이 훅 프로세스의 TMPDIR 이
-ALLOWED_ROOTS 안이면 허용한다. .claude/settings.json 의 env.TMPDIR 이 그 루트다.
+그리고 명령 문자열의 $TMPDIR·${TMPDIR} 이다.
+
+실측(2026-11-12, headless claude -p 새 세션): settings.json 의 env.TMPDIR 은
+Bash·Python·이 훅에 적용되지 않는다(같은 env 의 다른 변수는 적용됨).
+SessionStart 가 CLAUDE_ENV_FILE 에 export TMPDIR=<루트> 를 넣으면 Bash 와
+tempfile.gettempdir() 만 그 루트를 쓴다. PreToolUse 훅 프로세스에는
+CLAUDE_ENV_FILE 이 없고 TMPDIR 은 /var/folders 다.
+그래서 snake_case 키만 있는 Claude payload 의 $TMPDIR 쓰기는 허용하고,
+camelCase 가 하나라도 있거나 Grok/Cursor payload 는 이 프로세스의 TMPDIR 이
+ALLOWED_ROOTS 안일 때만 허용한다. 리터럴 /tmp·/var/folders 와 파일 경로는
+키 형식과 무관하게 양쪽 키에서 값을 읽는다.
 
 Claude Code 와 Grok CLI(Orca worker) 가 같은 .claude/settings.json 훅을 읽으므로
 두 도구의 입력 형식(file_path / path / target_notebook 등)을 모두 처리한다.
 읽기(ls, cat 등)와 정리용 rm 은 막지 않는다. 훅 자체 오류는 통과(fail open)시킨다.
-프로세스 안에서 기본값으로 열리는 tempfile 경로는 명령 문자열에 없으므로 이 훅이
-보지 못한다. 그 경로는 env.TMPDIR 로 scratchpad 를 가리켜 옮긴다.
 """
 import json
 import os
@@ -23,6 +30,16 @@ ALLOWED_ROOTS = (
     "/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/",
     "/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/",
 )
+# 호출자 구분. Claude Code 는 snake_case 만, Grok/Cursor 는 camelCase.
+CLAUDE_TOOL_NAME_KEY = "tool_name"
+CLAUDE_TOOL_INPUT_KEY = "tool_input"
+CLAUDE_PAYLOAD_KEYS = (CLAUDE_TOOL_NAME_KEY, CLAUDE_TOOL_INPUT_KEY)
+GROK_TOOL_NAME_KEY = "toolName"
+GROK_TOOL_INPUT_KEY = "toolInput"
+GROK_TOOL_INPUT_TRUNCATED_KEY = "toolInputTruncated"
+GROK_PAYLOAD_KEYS = (GROK_TOOL_NAME_KEY, GROK_TOOL_INPUT_KEY, GROK_TOOL_INPUT_TRUNCATED_KEY)
+CALLER_CLAUDE = "claude"
+CALLER_GROK = "grok"
 # 경로 토큰에서 공백·따옴표·셸 구분자 앞까지만 취한다. heredoc 처리 후 세그먼트에 쓴다.
 PATH_TOKEN_TAIL = r"[^\s'\"|;&<>()`]*"
 TMP_PATH_RE = re.compile(rf"(?:/private)?/tmp(?:/{PATH_TOKEN_TAIL})?")
@@ -71,9 +88,34 @@ def _is_blocked_temp(path: str) -> bool:
 
 
 def _tmpdir_is_inside_allowed_roots(environ: Mapping[str, str]) -> bool:
-    """훅이 물려받은 TMPDIR 이 scratchpad 루트 안이면 $TMPDIR 쓰기를 허용한다."""
+    """훅이 물려받은 TMPDIR 이 scratchpad 루트 안인지 본다."""
     tmpdir = environ.get("TMPDIR")
     return isinstance(tmpdir, str) and bool(tmpdir) and _is_allowed(tmpdir)
+
+
+def caller_kind(payload: Mapping) -> str:
+    """snake_case 만 있으면 Claude. camelCase 가 있거나 둘 다 없으면 Grok.
+
+    값 유무가 아니라 키 존재로 본다. None 이어도 키가 있으면 있는 것이다.
+    혼합 payload 는 Grok 으로 보아 $TMPDIR 허용을 주지 않는다.
+    """
+    has_snake = any(key in payload for key in CLAUDE_PAYLOAD_KEYS)
+    has_camel = any(key in payload for key in GROK_PAYLOAD_KEYS)
+    if has_snake and not has_camel:
+        return CALLER_CLAUDE
+    return CALLER_GROK
+
+
+def tmpdir_write_allowed(caller: str, environ: Mapping[str, str]) -> bool:
+    """$TMPDIR·${TMPDIR} 쓰기 허용 여부.
+
+    Claude 는 SessionStart 가 Bash 의 TMPDIR 을 루트로 두므로 훅 환경과 무관하게 허용한다.
+    Grok/Cursor 는 SessionStart·CLAUDE_ENV_FILE 적용이 미확인이라, 훅 환경의 TMPDIR 이
+    ALLOWED_ROOTS 안일 때만 허용한다. 리터럴 경로 판정은 이 함수를 쓰지 않는다.
+    """
+    if caller == CALLER_CLAUDE:
+        return True
+    return _tmpdir_is_inside_allowed_roots(environ)
 
 
 def _blocked_file_path(tool_input: dict) -> str | None:
@@ -122,9 +164,9 @@ def _strip_heredoc_bodies(command: str) -> str:
     return HEREDOC_BODY_RE.sub(lambda match: match.group(0).split("\n", 1)[0], command)
 
 
-def _blocked_command_path(command: str, environ: Mapping[str, str]) -> str | None:
-    """셸 쓰기 대상이 scratchpad 밖 임시 경로거나, 허용되지 않은 TMPDIR 이면 그 토큰을 돌려준다."""
-    tmpdir_allowed = _tmpdir_is_inside_allowed_roots(environ)
+def _blocked_command_path(command: str, environ: Mapping[str, str], caller: str) -> str | None:
+    """셸 쓰기 대상이 scratchpad 밖 임시 경로거나, 이 호출자에게 허용되지 않은 $TMPDIR 이면 그 토큰을 돌려준다."""
+    tmpdir_allowed = tmpdir_write_allowed(caller, environ)
     for segment in SEGMENT_SPLIT_RE.split(_strip_heredoc_bodies(command)):
         for path in TMP_PATH_RE.findall(segment):
             if not _is_allowed(path) and _writes_to(segment, path):
@@ -156,14 +198,18 @@ def main() -> int:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
         return 0
+    if not isinstance(payload, dict):
+        return 0
+    # 리터럴·파일 경로는 호출자와 무관하다. 어느 쪽 키에 값이 있든 읽는다.
     tool_name = payload.get("tool_name") or payload.get("toolName") or ""
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if not isinstance(tool_input, dict):
         return 0
+    caller = caller_kind(payload)
     blocked = _blocked_file_path(tool_input) if tool_name in FILE_WRITE_TOOLS else None
     command = tool_input.get("command")
     if blocked is None and isinstance(command, str):
-        blocked = _blocked_command_path(command, os.environ)
+        blocked = _blocked_command_path(command, os.environ, caller)
     if blocked is not None:
         _deny(blocked)
     return 0

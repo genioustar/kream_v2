@@ -2,8 +2,9 @@
 .claude/hooks/block-tmp-writes.py 회귀 테스트.
 
 훅을 실제 실행 파일로 돌려, Claude Code 와 Grok CLI 입력 형식 모두에서
-scratchpad 밖 임시 경로(/tmp, /var/folders, 허용되지 않은 $TMPDIR) 쓰기만
-막고 정상 작업은 통과시키는지 확인한다.
+scratchpad 밖 임시 경로(/tmp, /var/folders) 쓰기만 막고 정상 작업은 통과시키는지 확인한다.
+$TMPDIR 쓰기는 호출자별로 가른다. Claude payload 는 SessionStart 가 Bash TMPDIR 을
+루트로 두므로 허용하고, Grok payload 는 훅 환경 TMPDIR 이 ALLOWED_ROOTS 안일 때만 허용한다.
 차단 사례 중 일부는 이 프로젝트 작업 중 실제로 일어난 실수다.
 """
 import importlib.util
@@ -29,6 +30,21 @@ def load_hook():
     return module
 
 
+def run_hook_payload(payload: dict, env: dict | None = None, hook: Path = HOOK) -> dict | None:
+    """주어진 payload 로 훅을 실행한다. 통과면 None."""
+    result = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=HOOK_TIMEOUT_SEC,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"훅이 비정상 종료: {result.returncode} {result.stderr}")
+    return json.loads(result.stdout) if result.stdout.strip() else None
+
+
 def run_hook(
     tool_name: str,
     tool_input: dict,
@@ -40,17 +56,7 @@ def run_hook(
         payload = {"toolName": tool_name, "toolInput": tool_input, "toolInputTruncated": False}
     else:
         payload = {"tool_name": tool_name, "tool_input": tool_input}
-    result = subprocess.run(
-        [sys.executable, str(HOOK)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=HOOK_TIMEOUT_SEC,
-        env=env,
-    )
-    if result.returncode != 0:
-        raise AssertionError(f"훅이 비정상 종료: {result.returncode} {result.stderr}")
-    return json.loads(result.stdout) if result.stdout.strip() else None
+    return run_hook_payload(payload, env)
 
 
 def is_denied(reply: dict | None) -> bool:
@@ -172,7 +178,16 @@ class SystemTempTests(unittest.TestCase):
                 reply = run_hook("Bash", {"command": command})
                 self.assertFalse(is_denied(reply), f"{command} -> {reply}")
 
-    def test_tmpdir_write_follows_hook_environ(self):
+    def test_claude_tmpdir_write_allowed_when_hook_environ_is_system(self):
+        # SessionStart 가 Bash TMPDIR 을 루트로 둔다. 훅 프로세스 TMPDIR 은 /var/folders 여도 허용한다.
+        env = os.environ.copy()
+        env["TMPDIR"] = "/var/folders/xx/T/"
+        for command in ("echo x > $TMPDIR/a", "touch ${TMPDIR}/a"):
+            with self.subTest(command=command):
+                reply = run_hook("Bash", {"command": command}, env=env)
+                self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
+
+    def test_grok_tmpdir_write_follows_hook_environ(self):
         commands = ("echo x > $TMPDIR/a", "touch ${TMPDIR}/a")
         denied_env = os.environ.copy()
         denied_env["TMPDIR"] = "/var/folders/xx/T/"
@@ -180,25 +195,96 @@ class SystemTempTests(unittest.TestCase):
         allowed_env["TMPDIR"] = self.hook.ALLOWED_ROOTS[0]
         for command in commands:
             with self.subTest(command=command, decision="deny"):
-                reply = run_hook("Bash", {"command": command}, env=denied_env)
+                reply = run_hook("Bash", {"command": command}, grok_style=True, env=denied_env)
                 self.assertTrue(is_denied(reply), f"차단되어야 함: {command} -> {reply}")
             with self.subTest(command=command, decision="allow"):
-                reply = run_hook("Bash", {"command": command}, env=allowed_env)
+                reply = run_hook("Bash", {"command": command}, grok_style=True, env=allowed_env)
                 self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
+
+    def test_tmpdir_write_allowed_takes_caller_and_environ(self):
+        system = {"TMPDIR": "/var/folders/xx/T/"}
+        root = {"TMPDIR": self.hook.ALLOWED_ROOTS[0]}
+        self.assertTrue(self.hook.tmpdir_write_allowed(self.hook.CALLER_CLAUDE, system))
+        self.assertFalse(self.hook.tmpdir_write_allowed(self.hook.CALLER_GROK, system))
+        self.assertTrue(self.hook.tmpdir_write_allowed(self.hook.CALLER_GROK, root))
+        self.assertEqual(
+            self.hook.caller_kind({self.hook.CLAUDE_TOOL_NAME_KEY: "Bash", self.hook.CLAUDE_TOOL_INPUT_KEY: {}}),
+            self.hook.CALLER_CLAUDE,
+        )
+        self.assertEqual(
+            self.hook.caller_kind({self.hook.GROK_TOOL_NAME_KEY: "Bash", self.hook.GROK_TOOL_INPUT_KEY: {}}),
+            self.hook.CALLER_GROK,
+        )
+        self.assertEqual(self.hook.caller_kind({self.hook.CLAUDE_TOOL_NAME_KEY: None}), self.hook.CALLER_CLAUDE)
+        self.assertEqual(
+            self.hook.caller_kind({
+                self.hook.CLAUDE_TOOL_NAME_KEY: None,
+                self.hook.GROK_TOOL_INPUT_KEY: None,
+            }),
+            self.hook.CALLER_GROK,
+        )
+        self.assertEqual(self.hook.caller_kind({}), self.hook.CALLER_GROK)
+
+    def test_mixed_payload_literal_tmp_write_denied(self):
+        # 키를 호출자별로만 읽으면 반대편 키의 /tmp 쓰기를 놓친다.
+        payloads = (
+            {"tool_name": "Bash", "toolInput": {"command": "echo x > /tmp/a"}},
+            {"toolName": "Bash", "tool_input": {"command": "echo x > /tmp/a"}},
+            {"tool_name": "Write", "toolInput": {"file_path": "/tmp/a"}},
+            {"toolName": "Write", "tool_input": {"file_path": "/tmp/a"}},
+        )
+        for payload in payloads:
+            with self.subTest(payload=sorted(payload)):
+                reply = run_hook_payload(payload)
+                self.assertTrue(is_denied(reply), payload)
+
+    def test_mixed_keys_tmpdir_write_uses_grok_rule(self):
+        # 두 형식 키가 같이 있으면 Claude 로 보지 않는다. 훅 TMPDIR 이 /var/folders 면 차단.
+        command = "echo x > $TMPDIR/a"
+        env = os.environ.copy()
+        env["TMPDIR"] = "/var/folders/xx/T/"
+        payloads = (
+            {"tool_name": "Bash", "toolInput": {"command": command}},
+            {"toolName": "Bash", "tool_input": {"command": command}},
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "toolName": "Bash",
+                "toolInput": {"command": command},
+            },
+        )
+        for payload in payloads:
+            with self.subTest(payload=sorted(payload)):
+                reply = run_hook_payload(payload, env=env)
+                self.assertTrue(is_denied(reply), payload)
+
+    def test_hook_scripts_are_executable(self):
+        hooks = HOOK.parent
+        for name in ("block-tmp-writes.py", "session-tmpdir.py"):
+            path = hooks / name
+            with self.subTest(path=path.name):
+                self.assertTrue(os.access(path, os.X_OK), path)
 
     def test_tmpdir_old_name_is_allowed_when_hook_tmpdir_is_system(self):
         # $TMPDIR_OLD 는 $TMPDIR 이 아니다. 부정 전방탐색이 없으면 접두로 오인한다.
         env = os.environ.copy()
         env["TMPDIR"] = "/var/folders/xx/T/"
-        for command in ("echo x > $TMPDIR_OLD/x", "touch $TMPDIR_OLD/x"):
-            with self.subTest(command=command):
-                reply = run_hook("Bash", {"command": command}, env=env)
-                self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
+        for grok_style in (False, True):
+            for command in ("echo x > $TMPDIR_OLD/x", "touch $TMPDIR_OLD/x"):
+                with self.subTest(command=command, grok_style=grok_style):
+                    reply = run_hook("Bash", {"command": command}, grok_style=grok_style, env=env)
+                    self.assertFalse(is_denied(reply), f"통과해야 함: {command} -> {reply}")
 
-    def test_settings_tmpdir_is_an_allowed_root(self):
+    def test_settings_session_start_registers_tmpdir_hook(self):
         settings_path = HOOK.parent.parent / "settings.json"
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        self.assertIn(settings["env"]["TMPDIR"], self.hook.ALLOWED_ROOTS)
+        self.assertNotIn("env", settings)
+        self.assertIn("PreToolUse", settings["hooks"])
+        self.assertIn("PostToolUse", settings["hooks"])
+        groups = settings["hooks"]["SessionStart"]
+        commands = [hook["command"] for group in groups for hook in group["hooks"]]
+        self.assertTrue(any("session-tmpdir.py" in command for command in commands), commands)
+        self.assertTrue(all("matcher" not in group for group in groups))
 
 
 if __name__ == "__main__":

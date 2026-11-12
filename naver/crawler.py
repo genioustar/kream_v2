@@ -130,7 +130,7 @@ async def _is_sold_out_product(item, store_type: str) -> bool:
             }"""
         )
     except Exception as exc:
-        logger.debug(f"품절 여부 확인 실패 (수집 계속): {type(exc).__name__}")
+        logger.debug("품절 여부 확인 실패 (수집 계속): %s", type(exc).__name__)
         return False
 
 
@@ -156,7 +156,7 @@ async def _scroll_to_bottom(page, item_selector: str, diagnostics: NaverDiagnost
             pass
 
         current_count = await page.locator(item_selector).count()
-        logger.debug(f"스크롤 {attempt + 1}회 - 상품 수: {current_count}")
+        logger.debug("스크롤 %s회 - 상품 수: %s", attempt + 1, current_count)
 
         if current_count == prev_count:
             no_change_streak += 1
@@ -190,7 +190,7 @@ async def _extract_product(
     """
     try:
         if await _is_sold_out_product(item, store_type):
-            logger.debug(f"[{site_name}] 품절 상품 제외")
+            logger.debug("[%s] 품절 상품 제외", site_name)
             return [], SKIP_REASON_SOLD_OUT
 
         # 상품명
@@ -224,7 +224,7 @@ async def _extract_product(
         # 모델명 목록 추출 (복수 가능)
         model_names = extract_model_names(product_name, strategy=model_strategy)
         if not model_names:
-            logger.debug(f"[{site_name}] 모델명 없음 (건너뜀): {product_name}")
+            logger.debug("[%s] 모델명 없음 (건너뜀): %s", site_name, product_name)
             return [], SKIP_REASON_MODEL_MISSING
 
         return (
@@ -243,7 +243,7 @@ async def _extract_product(
         )
 
     except Exception as exc:
-        logger.debug(f"상품 파싱 실패 (건너뜀): {type(exc).__name__}")
+        logger.debug("상품 파싱 실패 (건너뜀): %s", type(exc).__name__)
         return [], SKIP_REASON_PARSE_ERROR
 
 
@@ -401,8 +401,7 @@ async def _crawl_site(
         )
 
     logger.info(
-        f"[{site_name}] 크롤링 시작: {safe_url(url)} "
-        f"(model_strategy={model_strategy})"
+        "[%s] 크롤링 시작: %s (model_strategy=%s)", site_name, safe_url(url), model_strategy
     )
 
     selectors = get_selectors(store_type)
@@ -438,7 +437,7 @@ async def _crawl_site(
                 raise
             except Exception as exc:
                 diagnostics.data["navigation_exception_class"] = type(exc).__name__
-                logger.warning(f"[{site_name}] 페이지 로드 미완료 ({type(exc).__name__}) — 목록 확인 계속")
+                logger.warning("[%s] 페이지 로드 미완료 (%s) — 목록 확인 계속", site_name, type(exc).__name__)
             await diagnostics.check("navigation")
 
         # 개인 계정 로그인 없이 공개 상품만 수집한다.
@@ -451,7 +450,7 @@ async def _crawl_site(
 
         # 무한스크롤 처리
         total_count = await _scroll_to_bottom(page, selectors["item"], diagnostics)
-        logger.info(f"[{site_name}] 스크롤 완료 - 총 상품 카드: {total_count}개")
+        logger.info("[%s] 스크롤 완료 - 총 상품 카드: %s개", site_name, total_count)
         if expected_count is not None:
             diagnostics.data["observed_card_count"] = total_count
             if total_count != expected_count:
@@ -471,8 +470,7 @@ async def _crawl_site(
             for reason in SKIP_REASONS
         )
         logger.info(
-            f"[{site_name}] 파싱 완료 - 성공: {len(products)}개, "
-            f"건너뜀: {skip_count}개 ({skip_details})"
+            "[%s] 파싱 완료 - 성공: %s개, 건너뜀: %s개 (%s)", site_name, len(products), skip_count, skip_details
         )
         await diagnostics.check("complete")
         diagnostics.data["product_count"] = len(products)
@@ -480,7 +478,7 @@ async def _crawl_site(
             diagnostics.data["failure_detail"] = "product_parse_error"
             raise NaverCollectionError("collection_error", diagnostics.report_path)
         diagnostics.finish("success")
-        logger.info(f"[{site_name}] 비로그인 수집 진단: {diagnostics.report_path}")
+        logger.info("[%s] 비로그인 수집 진단: %s", site_name, diagnostics.report_path)
         return products
 
     except NaverAccessError as exc:
@@ -501,7 +499,7 @@ async def _crawl_site(
             try:
                 await asyncio.wait_for(page.close(), timeout=5)
             except Exception as exc:
-                logger.warning(f"[{site_name}] 작업 탭 종료 실패 ({type(exc).__name__})")
+                logger.warning("[%s] 작업 탭 종료 실패 (%s)", site_name, type(exc).__name__)
 
 
 async def crawl_marketplace() -> list[MarketplaceProduct]:
@@ -526,7 +524,7 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
         url = (site_info.get("url") or "").strip()
         if not url:
             logger.warning(
-                f"[{site_info.get('site_name', '?')}] url 누락 — 해당 사이트 건너뜀"
+                "[%s] url 누락 — 해당 사이트 건너뜀", site_info.get('site_name', '?')
             )
             continue
         model_strategy = site_info.get("model_strategy", "auto")
@@ -552,7 +550,7 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
         attempted = False
         for site_info, cached in prepared:
             if cached is not None:
-                logger.info(f"[{site_info['site_name']}] 오늘 완료된 상품 {len(cached)}개 재사용")
+                logger.info("[%s] 오늘 완료된 상품 %s개 재사용", site_info['site_name'], len(cached))
                 all_products.extend(cached)
                 continue
             if attempted:
@@ -568,5 +566,5 @@ async def crawl_marketplace() -> list[MarketplaceProduct]:
                 # 목록 확인 실패 후 다른 스토어로 연속 접근하지 않는다.
                 raise RuntimeError(f"[{site_info['site_name']}] 수집 실패 — 후속 스토어 중단") from exc
 
-    logger.info(f"전체 수집 완료 - 총 {len(all_products)}개 상품")
+    logger.info("전체 수집 완료 - 총 %s개 상품", len(all_products))
     return all_products

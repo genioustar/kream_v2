@@ -84,7 +84,7 @@ async def _click_search_button(page) -> bool:
                 continue
             await _human_wait(0.3, 0.7)
             await btn.click()
-            logger.debug(f"검색 버튼 클릭 완료: {selector!r}")
+            logger.debug("검색 버튼 클릭 완료: %r", selector)
             return True
         except Exception:
             continue
@@ -100,7 +100,7 @@ async def _find_visible_input(page, timeout_ms: int = 2000):
         try:
             locator = page.locator(selector).first
             if await locator.is_visible(timeout=timeout_ms):
-                logger.debug(f"검색 입력창 발견: {selector!r}")
+                logger.debug("검색 입력창 발견: %r", selector)
                 return locator
         except Exception:
             continue
@@ -202,8 +202,7 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
     except Exception as exc:
         # Kream은 일부 리소스 오류 때문에 navigation 예외가 나도 본문이 렌더링될 수 있다.
         logger.debug(
-            f"Kream 상세 페이지 goto 에러(모델번호 확인 계속): "
-            f"url={product_url}, error={type(exc).__name__}"
+            "Kream 상세 페이지 goto 에러(모델번호 확인 계속): url=%s, error=%s", product_url, type(exc).__name__
         )
 
     check_response(response)
@@ -221,8 +220,7 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
         ).all_text_contents()
     except Exception as exc:
         logger.warning(
-            f"Kream 상세 모델번호 확인 실패: url={product_url}, "
-            f"error={type(exc).__name__}"
+            "Kream 상세 모델번호 확인 실패: url=%s, error=%s", product_url, type(exc).__name__
         )
         return None
 
@@ -231,7 +229,7 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
         if model_number:
             return model_number
 
-    logger.warning(f"Kream 상세 모델번호 파싱 실패: url={product_url}")
+    logger.warning("Kream 상세 모델번호 파싱 실패: url=%s", product_url)
     return None
 
 
@@ -244,21 +242,19 @@ async def _find_verified_kream_product(
     for card in cards_data[:MAX_RESULTS]:
         try:
             if not card["name"] or not card["priceStr"] or not card["href"]:
-                logger.debug(f"[{model_name}] 상품명/가격/URL 없음 — 건너뜀")
+                logger.debug("[%s] 상품명/가격/URL 없음 — 건너뜀", model_name)
                 continue
 
             actual_model_number = await _load_detail_model_number(page, card["href"])
             if actual_model_number is None:
                 logger.warning(
-                    f"[{model_name}] 실제 모델번호를 확인할 수 없음 — "
-                    f"url={card['href']} 건너뜀"
+                    "[%s] 실제 모델번호를 확인할 수 없음 — url=%s 건너뜀", model_name, card['href']
                 )
                 continue
 
             if not model_numbers_match(model_name, actual_model_number):
                 logger.info(
-                    f"[{model_name}] Kream 실제 모델번호 불일치 — "
-                    f"actual={actual_model_number!r}, url={card['href']} 건너뜀"
+                    "[%s] Kream 실제 모델번호 불일치 — actual=%r, url=%s 건너뜀", model_name, actual_model_number, card['href']
                 )
                 continue
 
@@ -276,19 +272,17 @@ async def _find_verified_kream_product(
                 kream_url=card["href"],
             )
             logger.info(
-                f"[{model_name}] 모델번호 검증 완료: actual={actual_model_number!r}, "
-                f"{card['name']!r}, 가격={kream_price:,}원, 거래량={trade_count}"
+                "[%s] 모델번호 검증 완료: actual=%r, %r, 가격=%s원, 거래량=%s", model_name, actual_model_number, card['name'], format(kream_price, ","), trade_count
             )
             return product
 
         except CrawlBlockedError:
             raise
         except Exception as exc:
-            logger.warning(f"[{model_name}] 후보 검증 실패: {exc} — 건너뜀")
+            logger.warning("[%s] 후보 검증 실패: %s — 건너뜀", model_name, exc)
 
     logger.info(
-        f"[{model_name}] 상위 {min(len(cards_data), MAX_RESULTS)}개 후보 중 "
-        "실제 모델번호가 일치하는 상품 없음"
+        "[%s] 상위 %s개 후보 중 실제 모델번호가 일치하는 상품 없음", model_name, min(len(cards_data), MAX_RESULTS)
     )
     return None
 
@@ -316,7 +310,7 @@ async def init_kream_page(context):
     except Exception as exc:
         # kream은 일부 리소스를 4xx로 응답해 Playwright가 navigation 실패로 처리하지만
         # 실제 HTML은 정상 로드되므로 무시하고 계속 진행
-        logger.debug(f"Kream 메인 페이지 goto 에러(무시): {type(exc).__name__}")
+        logger.debug("Kream 메인 페이지 goto 에러(무시): %s", type(exc).__name__)
 
     check_response(response)
     _raise_if_kream_limited(page)
@@ -328,7 +322,7 @@ async def init_kream_page(context):
             f"서버가 응답하지 않거나 봇 차단이 발생했을 수 있습니다."
         )
 
-    logger.info(f"Kream 메인 페이지 로드 완료 (url={current_url})")
+    logger.info("Kream 메인 페이지 로드 완료 (url=%s)", current_url)
     await _human_wait(1.5, 3.0)
 
     return page
@@ -350,7 +344,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     import re as _re
     import pathlib, datetime
 
-    logger.info(f"[{model_name}] Kream 검색 시작")
+    logger.info("[%s] Kream 검색 시작", model_name)
 
     # 헤더가 보이도록 맨 위로 스크롤 (검색결과 페이지에서 헤더가 숨겨질 수 있음)
     t0 = time.monotonic()
@@ -369,9 +363,9 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         await _human_type(page, model_name)      # 선택된 텍스트 대체하며 새 검색어 입력
         await _human_wait(0.3, 0.8)
         await page.keyboard.press("Enter")
-        logger.debug(f"[{model_name}] 검색창 입력 완료 → Enter 전송")
+        logger.debug("[%s] 검색창 입력 완료 → Enter 전송", model_name)
     except RuntimeError as exc:
-        logger.warning(f"[{model_name}] 검색 입력 실패: {exc}")
+        logger.warning("[%s] 검색 입력 실패: %s", model_name, exc)
         return None
 
     # SPA 렌더링 완료 대기
@@ -382,8 +376,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     except Exception:
         _title = "N/A"
     logger.debug(
-        f"[{model_name}] 렌더링 대기 완료 ({time.monotonic()-t0:.1f}s) "
-        f"url={page.url} title={_title!r}"
+        "[%s] 렌더링 대기 완료 (%.1fs) url=%s title=%r", model_name, time.monotonic()-t0, page.url, _title
     )
 
     # 차단 페이지 감지
@@ -397,17 +390,16 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
             shot_path = dump_dir / f"blocked_{ts}_{safe_name}.png"
             await page.screenshot(path=str(shot_path), full_page=True)
             logger.warning(
-                f"[{model_name}] 차단 페이지 감지 "
-                f"url={page.url} — {shot_path.name}"
+                "[%s] 차단 페이지 감지 url=%s — %s", model_name, page.url, shot_path.name
             )
         except Exception:
-            logger.warning(f"[{model_name}] 차단 페이지 감지")
+            logger.warning("[%s] 차단 페이지 감지", model_name)
         return None
 
     # 검색 결과 없음 감지
     no_result = await page.locator("text=검색 결과가 없습니다").count()
     if no_result > 0:
-        logger.info(f"[{model_name}] 검색 결과 없음")
+        logger.info("[%s] 검색 결과 없음", model_name)
         return []
 
     # 검색 결과 카드 대기
@@ -416,7 +408,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         await page.wait_for_selector(
             KREAM_SELECTORS["search_results"], timeout=SELECTOR_TIMEOUT
         )
-        logger.debug(f"[{model_name}] 카드 셀렉터 감지 완료 ({time.monotonic()-t0:.1f}s)")
+        logger.debug("[%s] 카드 셀렉터 감지 완료 (%.1fs)", model_name, time.monotonic()-t0)
     except Exception as exc:
         try:
             page_title = await page.title()
@@ -424,8 +416,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         except Exception:
             page_title, body_len = "N/A", -1
         logger.warning(
-            f"[{model_name}] 카드 셀렉터 타임아웃 ({time.monotonic()-t0:.1f}s) "
-            f"title={page_title!r} body_len={body_len} error={type(exc).__name__}"
+            "[%s] 카드 셀렉터 타임아웃 (%.1fs) title=%r body_len=%s error=%s", model_name, time.monotonic()-t0, page_title, body_len, type(exc).__name__
         )
         return None
 
@@ -451,10 +442,10 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     }""")
 
     total_found = len(cards_data)
-    logger.info(f"[{model_name}] 검색 결과 {total_found}개 발견")
+    logger.info("[%s] 검색 결과 %s개 발견", model_name, total_found)
 
     if total_found == 0:
-        logger.warning(f"[{model_name}] 처리할 카드 없음")
+        logger.warning("[%s] 처리할 카드 없음", model_name)
         return []
 
     product = await _find_verified_kream_product(model_name, cards_data, page)

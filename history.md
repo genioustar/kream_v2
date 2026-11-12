@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-12 — f-string 로그를 lazy %-formatting으로 바꿈
+
+- [로깅] 제품 코드의 f-string 로그 107개를 `logger.*(포맷, 인자)`로 바꿨다. 문구는 그대로다. `{값}`는 `%s`, `{값!r}`는 `%r`, `{값:.1f}`는 `%.1f`, `{값:,}`는 `format(값, ",")`를 `%s`에 넘긴다. `time.monotonic()` 3곳과 `await page.title()` 1곳은 인자에서 한 번씩만 평가된다.
+- [하네스] `tests/test_rule_logging.py`의 `MAX_FSTRING_LOG_CALLS`는 0이다. f-string 로그는 금지다.
+
 ## 2026-11-12 — 시스템 임시 디렉터리 쓰기를 TMPDIR 과 훅으로 막음
 
 - [하네스] `.claude/settings.json`의 `env.TMPDIR`은 `ALLOWED_ROOTS[0]`인 `/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/`다. settings env.TMPDIR 이 적용된 세션에서 Python tempfile 기본 경로는 scratchpad 루트로 간다. 훅은 `/var/folders`·`/private/var/folders` 쓰기와 명령의 `$TMPDIR`·`${TMPDIR}` 쓰기 대상을 막는다. 판정은 훅 프로세스의 `TMPDIR`을 인자로 받아, 그 값이 `ALLOWED_ROOTS` 안이면 `$TMPDIR` 쓰기를 허용한다. 읽기와 `rm`은 그대로 허용한다. 상대 경로 쓰기(`cd /tmp && echo > x`)는 여전히 문자열 휴리스틱 밖이다.

@@ -168,20 +168,19 @@ def _build_marketplace_products(
     """API 종류와 무관한 무신사 상품 필드를 공통 포맷으로 변환한다."""
     name = name.strip()
     if is_sold_out:
-        logger.debug(f"품절 상품 제외: {name!r}")
+        logger.debug("품절 상품 제외: %r", name)
         return []
 
     model_names = extract_model_names(name, strategy="slash_first")
 
     if not name or not url or price is None:
         logger.debug(
-            f"필수 정보 누락 — 건너뜀: "
-            f"name={name!r}, url={url!r}, price={price!r}"
+            "필수 정보 누락 — 건너뜀: name=%r, url=%r, price=%r", name, url, price
         )
         return []
 
     if not model_names:
-        logger.debug(f"모델코드 추출 실패 — 건너뜀: {name!r}")
+        logger.debug("모델코드 추출 실패 — 건너뜀: %r", name)
         return []
 
     return [
@@ -244,13 +243,13 @@ async def _crawl_brand_products(
     """브랜드/캠페인 URL의 PLP API 페이지를 끝까지 수집한다."""
     brand = _extract_brand_slug(sale_url)
     if not brand:
-        logger.warning(f"MUSINSA_SALE_URL에서 브랜드 slug를 찾을 수 없습니다: {sale_url}")
+        logger.warning("MUSINSA_SALE_URL에서 브랜드 slug를 찾을 수 없습니다: %s", sale_url)
         return []
 
     referer = _build_referer(sale_url, brand)
     next_url = _build_first_api_url(sale_url, brand, DEFAULT_PAGE_SIZE)
 
-    logger.info(f"무신사 브랜드 상품 크롤링 시작: brand={brand}, url={sale_url}")
+    logger.info("무신사 브랜드 상품 크롤링 시작: brand=%s, url=%s", brand, sale_url)
 
     products: list[MarketplaceProduct] = []
     seen_keys: set[tuple[str, str]] = set()
@@ -281,9 +280,7 @@ async def _crawl_brand_products(
                 added += 1
 
         logger.info(
-            f"무신사 page={pagination.get('page', page_num)} "
-            f"수집 {added}개 / 누적 {len(products)}개 "
-            f"(API 항목 {len(items)}개, total={pagination.get('totalCount')})"
+            "무신사 page=%s 수집 %s개 / 누적 %s개 (API 항목 %s개, total=%s)", pagination.get('page', page_num), added, len(products), len(items), pagination.get('totalCount')
         )
 
         if not pagination.get("hasNext"):
@@ -300,7 +297,7 @@ async def _crawl_brand_products(
             )
         await asyncio.sleep(REQUEST_DELAY_SEC)
 
-    logger.info(f"무신사 브랜드 크롤링 완료 — 총 {len(products)}개")
+    logger.info("무신사 브랜드 크롤링 완료 — 총 %s개", len(products))
     return products
 
 
@@ -315,7 +312,7 @@ async def _crawl_ranking_products(
     products: list[MarketplaceProduct] = []
     page_num = 0
 
-    logger.info(f"무신사 랭킹 상품 크롤링 시작: url={sale_url}")
+    logger.info("무신사 랭킹 상품 크롤링 시작: url=%s", sale_url)
 
     while (
         next_url
@@ -332,7 +329,7 @@ async def _crawl_ranking_products(
 
         items = _extract_ranking_items(data)
         if not items:
-            logger.info(f"무신사 랭킹 page={page_num} API 항목 없음 → 종료")
+            logger.info("무신사 랭킹 page=%s API 항목 없음 → 종료", page_num)
             break
 
         added = 0
@@ -346,8 +343,7 @@ async def _crawl_ranking_products(
                 added += 1
 
         logger.info(
-            f"무신사 랭킹 page={page_num} 수집 {added}개 / "
-            f"누적 {len(products)}개 (API 항목 {len(items)}개)"
+            "무신사 랭킹 page=%s 수집 %s개 / 누적 %s개 (API 항목 %s개)", page_num, added, len(products), len(items)
         )
 
         next_url = (data.get("link") or {}).get("next")
@@ -356,10 +352,10 @@ async def _crawl_ranking_products(
 
     if page_num >= MAX_RANKING_PAGES and next_url:
         logger.warning(
-            f"무신사 랭킹 최대 페이지({MAX_RANKING_PAGES}) 도달 — 수집 종료"
+            "무신사 랭킹 최대 페이지(%s) 도달 — 수집 종료", MAX_RANKING_PAGES
         )
 
-    logger.info(f"무신사 랭킹 크롤링 완료 — 총 {len(products)}개")
+    logger.info("무신사 랭킹 크롤링 완료 — 총 %s개", len(products))
     return products
 
 
@@ -393,7 +389,6 @@ async def crawl_musinsa() -> list[MarketplaceProduct]:
         return await _crawl_brand_products(sale_url, crawled_at)
 
     logger.warning(
-        "지원하지 않는 MUSINSA_SALE_URL 형식입니다. "
-        f"/brand/{{slug}} 또는 /main/.../ranking URL을 사용하세요: {sale_url}"
+        "지원하지 않는 MUSINSA_SALE_URL 형식입니다. /brand/{slug} 또는 /main/.../ranking URL을 사용하세요: %s", sale_url
     )
     return []

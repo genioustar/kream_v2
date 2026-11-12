@@ -200,7 +200,7 @@ async def crawl_special() -> list[MarketplaceProduct]:
         logger.info("config.SPECIAL_SALE_URL 미설정 — special 크롤링 건너뜀")
         return []
 
-    logger.info(f"SPECIAL_SALE_URL 크롤링 시작: {special_url}")
+    logger.info("SPECIAL_SALE_URL 크롤링 시작: %s", special_url)
     crawled_at = datetime.now().isoformat(timespec="seconds")
     model_strategy = getattr(config, "SPECIAL_MODEL_STRATEGY", "auto")
     if model_strategy not in MODEL_STRATEGIES:
@@ -219,9 +219,9 @@ async def crawl_special() -> list[MarketplaceProduct]:
                     timeout=PAGE_LOAD_TIMEOUT_MS,
                 )
             except Exception as exc:
-                logger.warning(f"goto 에러(계속 진행): {type(exc).__name__}: {exc}")
+                logger.warning("goto 에러(계속 진행): %s: %s", type(exc).__name__, exc)
 
-            logger.info(f"페이지 로드 완료 — URL: {page.url} | 제목: {await page.title()!r}")
+            logger.info("페이지 로드 완료 — URL: %s | 제목: %r", page.url, await page.title())
             await asyncio.sleep(PAGE_SETTLE_SEC)
 
             seen_keys: set[tuple[str, str]] = set()
@@ -243,17 +243,16 @@ async def crawl_special() -> list[MarketplaceProduct]:
                         seen_keys.add(key)
                         products.append(product)
                         logger.info(
-                            f"수집: {product.product_name!r} | "
-                            f"{product.model_name} | {product.price:,}원"
+                            "수집: %r | %s | %s원", product.product_name, product.model_name, format(product.price, ",")
                         )
 
             # 초기 수집 (스크롤 전)
             try:
                 initial_cards = await page.evaluate(_JS_EXTRACT)
                 _merge_cards(initial_cards)
-                logger.info(f"초기 수집: {len(products)}개")
+                logger.info("초기 수집: %s개", len(products))
             except Exception as exc:
-                logger.debug(f"초기 JS 실행 실패: {exc}")
+                logger.debug("초기 JS 실행 실패: %s", exc)
 
             # 스크롤 루프
             stall_streak = 0
@@ -266,16 +265,16 @@ async def crawl_special() -> list[MarketplaceProduct]:
 
                 attempt += 1
                 logger.info(
-                    f"스크롤 {attempt}회 — scrollY: {prev_y}→{curr_y}, 누적: {len(products)}개"
+                    "스크롤 %s회 — scrollY: %s→%s, 누적: %s개", attempt, prev_y, curr_y, len(products)
                 )
 
                 try:
                     cards = await page.evaluate(_JS_EXTRACT)
                     before = len(products)
                     _merge_cards(cards)
-                    logger.debug(f"  신규 {len(products) - before}개 추가")
+                    logger.debug("  신규 %s개 추가", len(products) - before)
                 except Exception as exc:
-                    logger.debug(f"스크롤 후 JS 실행 실패: {exc}")
+                    logger.debug("스크롤 후 JS 실행 실패: %s", exc)
 
                 if curr_y == prev_y:
                     stall_streak += 1
@@ -285,7 +284,7 @@ async def crawl_special() -> list[MarketplaceProduct]:
                 else:
                     stall_streak = 0
 
-            logger.info(f"special 크롤링 완료 — 총 {len(products)}개")
+            logger.info("special 크롤링 완료 — 총 %s개", len(products))
             return products
 
         finally:

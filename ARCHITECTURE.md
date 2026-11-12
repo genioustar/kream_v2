@@ -153,7 +153,7 @@ resell-sniper/
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
 │   ├── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
 │   ├── test_logger.py            # setup_logging 포맷·멱등·DEBUG 파일/서드파티 INFO 필터·임시 로그 디렉터리·subprocess import 시 핸들러 0·mkdir 0회
-│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 래칫, setup_logging() 이 __main__ 첫 문장, PROJECT_LOGGERS 정합성, dictConfig·fileConfig 금지
+│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 금지, setup_logging() 이 __main__ 첫 문장, PROJECT_LOGGERS 정합성, dictConfig·fileConfig 금지
 
 ├── requirements.txt
 └── venv/

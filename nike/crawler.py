@@ -13,9 +13,7 @@ Kids 카테고리: 성인 전용 URL(config.NIKE_SALE_URL) 로 1차 제외 +
 import asyncio
 import json
 import re
-from dataclasses import asdict
-from datetime import date, datetime
-from pathlib import Path
+from datetime import datetime
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
@@ -278,26 +276,3 @@ async def crawl_nike() -> list[MarketplaceProduct]:
 
         finally:
             await page.close()
-
-
-# ---------------------------------------------------------------------------
-# 단독 실행 진입점
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    async def _main():
-        products = await crawl_nike()
-        if not products:
-            print("수집된 상품이 없습니다.")
-            return
-
-        today = date.today().strftime("%Y%m%d")
-        out_dir = Path(config.OUTPUT_DIR) / today
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "nike_products.json"
-        out_path.write_text(
-            json.dumps([asdict(p) for p in products], ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"\n총 {len(products)}개 저장 → {out_path}")
-
-    asyncio.run(_main())

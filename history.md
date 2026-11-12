@@ -1,5 +1,16 @@
 # 변경 히스토리
 
+## 2026-11-12 — --site 재수집의 네이버 빈 결과는 기존 파일 유지
+
+- [main] `--site`로 네이버를 다시 수집해 결과가 0개이고 오늘자 파일이 있으면 덮어쓰지 않고 `기존 파일 유지`를 경고한다. `_crawl_required_site`는 `force` 인자 없이 `not products and output.exists()`만 본다. `force`가 아니면 `_crawl_site`가 오늘자 파일을 이미 스킵하므로 동작이 같다. 파일이 없으면 빈 리스트를 저장한다. `RuntimeError`는 `sys.exit(1)`, 그 외 예외는 다시 던진다. `main('full', site_keys)`는 키를 무시하고 표 전체를 기존 스킵 규칙으로 돈다. `main`은 `force = mode == "crawl" and site_keys is not None`일 때만 키를 `_select_sites`에 넘긴다.
+- 빈 결과면 기존 파일 유지(선택 사이트, 그리고 --site 재수집 시 네이버).
+
+## 2026-11-11 — 크롤러 단독 실행을 --site로 통일
+
+- [실행] 크롤러 단독 실행은 `main.py --mode crawl --site`로 통일 — 할인율·저장 경로·원자적 쓰기 일치
+  - SUPERSEDED: 크롤러별 `python -m <site>.crawler` 단독 실행 — 할인율 누락, 저장 경로 불일치, print 로그
+- [main] `--site`는 `nargs="+"`이고 choices는 `SITE_CRAWLERS`의 key다. crawl 모드에서만 받으며 full·kream과 함께 주면 argparse가 종료 코드 2로 끝낸다. 중복 키는 한 번만, 입력 순서가 아니라 등록 표 순서로 `_select_sites`가 고른다. `_crawl_site(..., force=True)`는 오늘자 파일이 있어도 다시 수집해 덮어쓴다. 선택 사이트의 빈 결과는 저장하지 않아 기존 파일을 남긴다. 필수·선택 예외 규칙은 그대로다. naver·adidas·musinsa·nike·special·kream의 `__main__`과 그 블록에서만 쓰던 import를 제거했다. Kream 검색은 `--mode kream`이 대신한다.
+
 ## 2026-11-11 — STEP 1 사이트 등록 표
 
 - [main] STEP 1의 사이트별 반복 블록을 frozen dataclass `SiteCrawler` 튜플 `SITE_CRAWLERS`로 모았다. 순서는 marketplace, adidas, musinsa, ssfshop, nike, special이다. `required`인 네이버만 빈 결과도 저장하고 `RuntimeError`에서 `sys.exit(1)`한다. `CrawlBlockedError`는 `RuntimeError`의 서브클래스라 네이버에서는 그 종료 경로를 탄다. 선택 사이트는 빈 결과를 저장하지 않고, `CrawlBlockedError`는 전파하며, 그 외 예외는 경고 후 다음 사이트로 넘어간다.

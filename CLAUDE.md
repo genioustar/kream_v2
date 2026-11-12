@@ -10,6 +10,7 @@ python chrome.py
 # 파이프라인 실행
 python main.py                 # full (기본): 크롤링 + Kream 차익 검색
 python main.py --mode crawl    # 크롤링만 (Kream 검색 없음)
+python main.py --mode crawl --site adidas   # 지정 사이트만 다시 수집 (오늘자 파일도 덮어씀)
 python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재사용)
 ```
 

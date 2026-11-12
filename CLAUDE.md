@@ -70,6 +70,7 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 | 크롤러는 요청 실패를 삼키고 루프를 끝내 일부 결과를 반환하지 않는다 | `tests/test_rule_crawler_except.py`(except 안 break·CrawlBlockedError 삼킴 금지), 크롤러별 회귀 테스트 | 무신사 9d5690a `except ... break`, SSF void 태그·목록 영역 없음 |
 | ARCHITECTURE.md tests 트리와 SITE_DISCOUNT_RATES 표는 실제와 같다 | `tests/test_rule_docs_sync.py` | 묶음 1 트리 누락, c6cbde5 트리 누락, 아디다스 30% 표기 |
 | 로그는 lazy %-formatting | `tests/test_rule_logging.py`(f-string 로그 수 래칫, 기준 107) | 새 코드마다 f-string 로그 증가 |
+| JSON 파일은 common/atomic_io.write_json_atomic 으로만 쓴다 | `tests/test_rule_atomic_write.py` | checkpoint·diagnostics·adidas 진단의 중복·비원자적 쓰기 |
 | 임시 파일은 scratchpad 안에만 쓴다 | `.claude/hooks/block-tmp-writes.py`(PreToolUse, Claude·Grok worker 공통), `tests/test_tmp_write_guard.py` | 잘못된 scratchpad 경로 쓰기 2회, worker 의 `/tmp` 파일 |
 | 브라우저 에러는 정해진 순서로 한 번만 대응한다 | `.claude/rules/browser-errors.md`(판단 영역이라 문서) | 차단 후 자동 재시도가 여러 번 SUPERSEDED |
 

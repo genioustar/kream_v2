@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from common.atomic_io import TEMP_SUFFIX
 from naver.crawler import _wait_for_product_list
 from naver.diagnostics import (
     NaverAccessError, NaverCollectionError, NaverDiagnostics, classify_access, safe_url,
@@ -206,3 +207,21 @@ class NaverDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 await self.diagnostics.check("navigation")
         self.assertEqual(caught.exception.reason, "account_protection")
         self.assertNotIn("TOKEN", str(caught.exception))
+
+    def test_replace_oserror_warns_and_leaves_no_temp(self):
+        original_replace = Path.replace
+
+        def fail_temp_replace(self_path, target):
+            if self_path.suffix == TEMP_SUFFIX:
+                raise OSError("replace failed")
+            return original_replace(self_path, target)
+
+        before = self.diagnostics.report_path.read_text(encoding="utf-8")
+        with patch.object(Path, "replace", fail_temp_replace), \
+             self.assertLogs("naver.diagnostics", level="WARNING") as logs:
+            self.diagnostics._save()
+        self.assertIn("진단 파일 저장 실패 (OSError)", "\n".join(logs.output))
+        self.assertEqual(self.diagnostics.data["diagnostic_write_error"], "OSError")
+        self.assertEqual(self.diagnostics.report_path.read_text(encoding="utf-8"), before)
+        self.assertFalse(self.diagnostics.report_path.with_suffix(TEMP_SUFFIX).exists())
+        self.assertEqual(list(self.diagnostics.report_path.parent.glob(f"*{TEMP_SUFFIX}")), [])

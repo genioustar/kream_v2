@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 import tempfile
 import unittest
 from dataclasses import asdict
@@ -7,10 +9,21 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import config
+from common.atomic_io import DEFAULT_FILE_MODE
 from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError
 from naver.checkpoint import CHECKPOINT_VERSION, _checkpoint_path, load_checkpoint, save_checkpoint
 from naver.crawler import crawl_marketplace
+
+EXISTING_FILE_MODE = 0o640
+
+
+def _process_umask() -> int:
+    previous = os.umask(0)
+    try:
+        return previous
+    finally:
+        os.umask(previous)
 
 
 class NaverCheckpointTests(unittest.IsolatedAsyncioTestCase):
@@ -78,6 +91,15 @@ class NaverCheckpointTests(unittest.IsolatedAsyncioTestCase):
     def test_empty_success_is_distinct_from_cache_miss(self):
         save_checkpoint(self.site, [])
         self.assertEqual(load_checkpoint(self.site), [])
+
+    def test_save_keeps_existing_mode_and_leaves_no_temp(self):
+        path = save_checkpoint(self.site, [self.product])
+        os.chmod(path, EXISTING_FILE_MODE)
+        self.assertNotEqual(EXISTING_FILE_MODE, DEFAULT_FILE_MODE & ~_process_umask())
+        save_checkpoint(self.site, [self.product])
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), EXISTING_FILE_MODE)
+        self.assertEqual(load_checkpoint(self.site), [self.product])
+        self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
     def test_partial_files_are_not_final_pipeline_inputs(self):
         path = save_checkpoint(self.site, [self.product])

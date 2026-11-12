@@ -1,5 +1,9 @@
 # 변경 히스토리
 
+## 2026-11-12 — 모델코드 추출기에서 연도+브랜드 토큰 제외
+
+- [모델명] `extract_model_names`는 전략별 후보를 `_deduplicate`한 뒤 `_drop_season_brand_tokens`로 연도 2자리+브랜드형 토큰을 뺀다. 판정은 `_SEASON_BRAND_RE`(숫자 2자리 + 대문자 1자 + 소문자 2자 이상, 그 외 문자 없음). 시즌 토큰이 없으면 후보를 그대로 둔다. strong 재판정은 시즌 토큰이 든 그룹에만 하고, 시즌 토큰이 없는 그룹은 유지한다. 시즌 그룹은 토큰을 뺀 뒤 strong이 남으면 그 부분을 남기고, 없으면 버린다. 결과가 비면 원래 후보를 유지한다. `26Paco`·`25Nike`가 해당하고, `26Pa`·`26Paco 900`·괄호 안 하이픈 코드(`OOAHH-BLACK`)는 빼지 않는다. `26PACO`·`JC1316`·`DD1391-100`·`FZ5808`·`2Y3456`은 빼지 않는다. 무신사 2026-11-12 고유 제목 중 12개만 스타일코드로 줄어든다. `marketplace_products.json`의 네이버 8개 스토어 1668 제목은 변경 0이고, brickmansion 제목(20261109·10·11)도 변경 0이다.
+
 ## 2026-11-12 — 시스템 임시 디렉터리 쓰기를 TMPDIR 과 훅으로 막음
 
 - [하네스] `.claude/settings.json`의 `env.TMPDIR`은 `ALLOWED_ROOTS[0]`인 `/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/`다. settings env.TMPDIR 이 적용된 세션에서 Python tempfile 기본 경로는 scratchpad 루트로 간다. 훅은 `/var/folders`·`/private/var/folders` 쓰기와 명령의 `$TMPDIR`·`${TMPDIR}` 쓰기 대상을 막는다. 판정은 훅 프로세스의 `TMPDIR`을 인자로 받아, 그 값이 `ALLOWED_ROOTS` 안이면 `$TMPDIR` 쓰기를 허용한다. 읽기와 `rm`은 그대로 허용한다. 상대 경로 쓰기(`cd /tmp && echo > x`)는 여전히 문자열 휴리스틱 밖이다.

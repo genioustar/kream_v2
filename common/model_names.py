@@ -46,6 +46,9 @@ _YEAR_RANGE_RE = re.compile(r"^(?:19|20)\d{2}[-~](?:\d{2}|(?:19|20)\d{2})$")
 _SEASON_RE = re.compile(
     r"^(?:(?:\d{2}|\d{4})(?:SS|FW)|(?:SS|FW)(?:\d{2}|\d{4})|00S)$"
 )
+# 연도 2자리 + 브랜드(대문자 1자 + 소문자 2자 이상). 26PACO처럼 전부 대문자인
+# 토큰은 실제 코드일 수 있어 맞추지 않는다. JC1316·DD1391-100·2Y3456도 비대상.
+_SEASON_BRAND_RE = re.compile(r"^\d{2}[A-Z][a-z]{2,}$")
 _COUNT_RE = re.compile(r"^(\d{1,3})(P|PACK|PCS?|COLORS?|WAYS?)$")
 _UNIT_RE = re.compile(r"^\d{1,3}(?:CM|MM|ML|CC|KG|G|L|IN)$")
 _WIDTH_RE = re.compile(r"^\d(?:E|EE)$")
@@ -325,6 +328,51 @@ def _deduplicate(candidates: list[str]) -> list[str]:
     return unique
 
 
+def _drop_season_brand_tokens(candidates: list[str]) -> list[str]:
+    """연도+브랜드형 토큰은 그 토큰이 든 그룹에서만 뺀다.
+
+    시즌 토큰이 하나도 없으면 후보를 그대로 둔다. 시즌 토큰이 없는 그룹은
+    strong 재판정 없이 유지한다. 시즌 토큰이 있던 그룹만 토큰을 뺀 뒤 strong
+    토큰이 남으면 그 부분을 남기고, 없으면 그 그룹을 버린다. 결과가 비면
+    원래 후보를 반환한다.
+    """
+    token_groups = [candidate.split() for candidate in candidates]
+    if not any(
+        _SEASON_BRAND_RE.fullmatch(token)
+        for tokens in token_groups
+        for token in tokens
+    ):
+        return candidates
+
+    kept_groups: list[list[str]] = []
+    for tokens in token_groups:
+        if not any(_SEASON_BRAND_RE.fullmatch(token) for token in tokens):
+            kept_groups.append(tokens)
+            continue
+        remaining = [
+            token for token in tokens if _SEASON_BRAND_RE.fullmatch(token) is None
+        ]
+        has_strong = any(
+            _token_kind(token, allow_letter_hyphen=False) == "strong"
+            for token in remaining
+        )
+        if has_strong:
+            kept_groups.append(remaining)
+    if not kept_groups:
+        return candidates
+
+    kept: list[str] = []
+    seen: set[str] = set()
+    for tokens in kept_groups:
+        normalized = " ".join(tokens)
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(normalized)
+    return kept
+
+
 def extract_model_names(product_name: str, strategy: str = "auto") -> list[str]:
     """
     상품명에서 사이트 표기에 맞는 Kream 검색용 모델명 목록을 추출한다.
@@ -393,7 +441,7 @@ def extract_model_names(product_name: str, strategy: str = "auto") -> list[str]:
         stages = (bracket, slash_grouped, suffix_grouped, inline_grouped)
 
     for stage in stages:
-        candidates = _deduplicate(stage())
+        candidates = _drop_season_brand_tokens(_deduplicate(stage()))
         if candidates:
             return candidates
     return []

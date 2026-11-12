@@ -1,5 +1,15 @@
 # 변경 히스토리
 
+## 2026-11-12 — TMPDIR 은 SessionStart 훅이 지정하고 루트를 만든다
+
+- [하네스] TMPDIR 은 SessionStart 훅이 CLAUDE_ENV_FILE 로 지정하고 루트를 만든다 — 실측: settings env.TMPDIR 은 적용되지 않음(다른 변수는 적용), SessionStart export 는 Bash·tempfile 에 적용
+  - SUPERSEDED: .claude/settings.json env.TMPDIR 지정 — 새 세션에서도 /var/folders 로 되돌아감
+- [하네스] 같은 실측으로 아래 기존 항목의 두 미확인이 해소됐다. 훅 프로세스에는 settings env 가 전달되지 않고 TMPDIR 은 /var/folders 이며 CLAUDE_ENV_FILE 도 오지 않는다. TMPDIR 루트는 `.claude/hooks/session-tmpdir.py`의 `prepare`가 `mkdir(parents=True, exist_ok=True)`로 만든다. 루트가 없으면 Python tempfile 은 /tmp, BSD mktemp 는 /var/folders 로 조용히 바뀌던 문제가 해소된다. 루트 문자열은 `block-tmp-writes.py`의 `ALLOWED_ROOTS[0]`만 둔다.
+- [하네스] `$TMPDIR`·`${TMPDIR}` 쓰기 판정은 호출자별로 가른다. snake_case 키(`tool_name`/`tool_input`)만 있는 Claude Code payload 는 SessionStart 가 Bash 의 TMPDIR 을 루트로 두므로 허용한다. camelCase 키(`toolName`/`toolInput`)가 하나라도 있거나 키가 섞이면 Grok 기준으로, 훅 프로세스 TMPDIR 이 ALLOWED_ROOTS 안일 때만 허용한다. 리터럴 `/tmp`·`/var/folders` 판정은 호출자와 무관하다.
+- [하네스] 남은 한계: Grok worker 가 SessionStart·CLAUDE_ENV_FILE 을 쓰는지는 미확인이다. 따옴표로 감싼 `"$TMPDIR/x"` 와 `${TMPDIR:-...}` 우회는 그대로다(별도 작업).
+- [하네스] 남은 한계: Claude 세션에서 SessionStart 가 실패하면(실행 권한 없음·훅 오류·CLAUDE_ENV_FILE 미지원) Bash TMPDIR 은 /var/folders 로 남는데 훅은 Claude payload 의 $TMPDIR 쓰기를 허용하므로 막지 못한다(수용 위험).
+- [테스트] `session-tmpdir.py`의 main 은 subprocess 로 돌리지 않는다. main 이 실제 `ALLOWED_ROOTS[0]`를 만들어 CI 에서 그 경로를 건드리거나 권한 때문에 실패할 수 있어, `prepare` 단위 테스트와 루트를 임시 경로로 바꾼 in-process `main` 호출로 대체했다.
+
 ## 2026-11-12 — 시스템 임시 디렉터리 쓰기를 TMPDIR 과 훅으로 막음
 
 - [하네스] `.claude/settings.json`의 `env.TMPDIR`은 `ALLOWED_ROOTS[0]`인 `/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/`다. settings env.TMPDIR 이 적용된 세션에서 Python tempfile 기본 경로는 scratchpad 루트로 간다. 훅은 `/var/folders`·`/private/var/folders` 쓰기와 명령의 `$TMPDIR`·`${TMPDIR}` 쓰기 대상을 막는다. 판정은 훅 프로세스의 `TMPDIR`을 인자로 받아, 그 값이 `ALLOWED_ROOTS` 안이면 `$TMPDIR` 쓰기를 허용한다. 읽기와 `rm`은 그대로 허용한다. 상대 경로 쓰기(`cd /tmp && echo > x`)는 여전히 문자열 휴리스틱 밖이다.

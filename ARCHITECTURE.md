@@ -148,6 +148,7 @@ resell-sniper/
 │   ├── test_main_site_registry.py # STEP 1 등록 표·--site 파싱·재수집·네이버 빈 결과 유지·full은 재수집 안 함·종료 코드·__main__ 제거
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
 │   ├── test_ssfshop_collection.py # SSF SHOP 목록 파싱·페이지 순회·실패 시 중단 회귀 테스트
+│   ├── test_session_tmpdir.py    # .claude/hooks/session-tmpdir.py: SessionStart TMPDIR export·루트 보장
 │   ├── test_tmp_write_guard.py   # .claude/hooks/block-tmp-writes.py: scratchpad 밖 임시 경로 쓰기 차단 회귀 테스트
 │   ├── test_rule_atomic_write.py # 저장소 규칙: JSON 파일은 common/atomic_io.write_json_atomic 으로만 쓴다
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지

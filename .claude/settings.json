@@ -1,9 +1,17 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "TMPDIR": "/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/"
-  },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-tmpdir.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",

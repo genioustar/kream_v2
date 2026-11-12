@@ -1,16 +1,16 @@
 """같은 날, 같은 설정으로 완료한 스토어만 재사용한다."""
 import hashlib
 import json
+import logging
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
 import config
 from common.atomic_io import write_json_atomic
-from common.logger import get_logger
 from common.models import MarketplaceProduct
 
-logger = get_logger("naver.checkpoint")
+logger = logging.getLogger(__name__)
 
 # 상품 URL 생성 규칙 등 저장 형식이 바뀌면 올린다. 과거 값은 1이었고, 2로 올린 이유는 history.md에 있다.
 CHECKPOINT_VERSION = 2

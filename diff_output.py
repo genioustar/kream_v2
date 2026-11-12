@@ -9,6 +9,7 @@ diff_output.py
 """
 import argparse
 import json
+import logging
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -16,10 +17,11 @@ from typing import Optional
 
 import config
 from common.atomic_io import write_json_atomic
-from common.logger import get_logger
+from common.logger import setup_logging
 from common.models import FieldChange, ItemDiff
 
-logger = get_logger("diff_output")
+# 직접 실행하면 __name__ 이 "__main__" 이 되어 로거 이름이 "diff_output" 이 아니고 DEBUG 목록에서도 빠진다.
+logger = logging.getLogger("diff_output")
 
 # ---------------------------------------------------------------------------
 # 상수
@@ -300,4 +302,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    setup_logging()
     main()

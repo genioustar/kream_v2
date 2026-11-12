@@ -12,16 +12,16 @@ special/crawler.py
   3. (URL, model_name) 키로 중복 제거하며 MarketplaceProduct 변환
 """
 import asyncio
+import logging
 import re
 from datetime import datetime
 
 import config
 from common.browser import create_browser
-from common.logger import get_logger
 from common.model_names import MODEL_STRATEGIES, extract_model_names
 from common.models import MarketplaceProduct
 
-logger = get_logger("special.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

@@ -1,6 +1,7 @@
 """네이버 접근 상태를 분류하고 개인정보 없는 실행 진단을 저장한다."""
 import asyncio
 import inspect
+import logging
 import re
 import time
 from collections import Counter
@@ -10,10 +11,9 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from common.atomic_io import write_json_atomic
-from common.logger import get_logger
 from common.pacing import CrawlBlockedError
 
-logger = get_logger("naver.diagnostics")
+logger = logging.getLogger(__name__)
 
 _REASONS = {
     "account_protection": "계정 보호조치 화면 감지 — 평소 사용하는 네이버 앱에서 계정 상태를 확인하세요",

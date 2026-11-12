@@ -4,11 +4,13 @@
 resell-sniper Space 를 열고, 확인이 끝나면 그 Space 만 닫는다.
 """
 import asyncio
+import logging
 import sys
 
-from common.logger import get_logger
+from common.logger import setup_logging
 
-logger = get_logger("chrome")
+# 직접 실행하면 __name__ 이 "__main__" 이 되어 로거 이름이 "chrome" 이 아니고 DEBUG 목록에서도 빠진다.
+logger = logging.getLogger("chrome")
 
 
 async def check_connection() -> bool:
@@ -33,4 +35,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    setup_logging()
     sys.exit(main())

@@ -4,12 +4,12 @@
 이름이 resell-sniper 인 Space 만 쓰고, 그 밖의 탭은 건드리지 않는다.
 """
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from common.ego_session import SPACE_NAME, EgoClient, EgoPage
-from common.logger import get_logger
 
-logger = get_logger("common.browser")
+logger = logging.getLogger(__name__)
 
 
 class _CrawlerTabs:

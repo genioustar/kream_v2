@@ -6,6 +6,7 @@ adidas/crawler.py
 사전 준비: ego lite 설치.
 """
 import asyncio
+import logging
 import random
 import re
 from datetime import date, datetime, timezone
@@ -18,11 +19,10 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 import config
 from common.atomic_io import write_json_atomic
 from common.browser import create_browser
-from common.logger import get_logger
 from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError
 
-logger = get_logger("adidas.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

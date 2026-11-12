@@ -3,12 +3,11 @@ kream/history_marker.py
 직전 날짜의 arbitrage_results.json 과 비교해 오늘 결과 항목에 저장 이력·가격 변동 표시를 붙인다.
 """
 import json
+import logging
 import re
 from pathlib import Path
 
-from common.logger import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 DATE_FOLDER_PATTERN = re.compile(r"^\d{8}$")
 RESULT_FILENAME = "arbitrage_results.json"

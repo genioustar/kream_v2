@@ -15,18 +15,18 @@ hasNext가 참인데 nextPageUrl이 비어 있으면 RuntimeError로 중단한�
 """
 import asyncio
 import json
+import logging
 from datetime import datetime
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 import config
-from common.logger import get_logger
 from common.model_names import extract_model_names
 from common.models import MarketplaceProduct
 from common.pacing import check_response
 
-logger = get_logger("musinsa.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

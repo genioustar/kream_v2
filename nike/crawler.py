@@ -12,6 +12,7 @@ Kids 카테고리: 성인 전용 URL(config.NIKE_SALE_URL) 로 1차 제외 +
 """
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime
 from urllib.parse import urlparse
@@ -20,10 +21,9 @@ from playwright.async_api import Page
 
 import config
 from common.browser import create_browser
-from common.logger import get_logger
 from common.models import MarketplaceProduct
 
-logger = get_logger("nike.crawler")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 상수

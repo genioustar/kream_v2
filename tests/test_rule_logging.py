@@ -3,8 +3,7 @@
 로깅 설정은 common.logger.setup_logging() 한 곳이고, 모듈은 logging.getLogger(__name__) 를 쓴다.
 
 반복된 실수: 규칙이 문서에만 있어 새 코드가 f-string 로그를 계속 늘렸다(AST 기준 9d5690a 126개 → cdb3c09 129개).
-기존 호출은 많아서 한 번에 고치지 않고, 기준선보다 늘어나면 실패하는 래칫으로 막는다.
-기존 호출을 고치면 MAX_FSTRING_LOG_CALLS 를 그 수만큼 내린다.
+f-string 로그는 금지다. logger.info(f"... {x}") 대신 logger.info("... %s", x) 를 쓴다.
 모듈마다 get_logger 로 핸들러를 붙이면 import 만으로 logs/ 가 생겼다.
 """
 import ast
@@ -12,13 +11,13 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# 2026-11-11 STEP 1 등록 표로 f-string 로그 19개를 뺀 저장소 전체(tests·venv 제외) 호출 수. 올리지 말고 내리기만 한다.
-MAX_FSTRING_LOG_CALLS = 107
+# 제품 코드(tests·venv 제외)의 f-string 로그는 0개여야 한다.
+MAX_FSTRING_LOG_CALLS = 0
 LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical"}
 EXCLUDED_DIRS = {"venv", ".venv", "tests", "__pycache__"}
 FIX_HINT = (
     'logger.info(f"... {x}") 대신 logger.info("... %s", x) 로 써라. '
-    "기존 f-string 로그를 고쳤다면 MAX_FSTRING_LOG_CALLS 를 줄여라."
+    "f-string 로그는 금지다."
 )
 
 
@@ -295,13 +294,13 @@ def logging_sources() -> list[Path]:
 
 
 class LoggingRuleTests(unittest.TestCase):
-    def test_fstring_logs_do_not_grow(self):
+    def test_no_fstring_logs(self):
         found = []
         for path in project_sources():
             found += fstring_log_calls(path.read_text(encoding="utf-8"), str(path.relative_to(ROOT)))
-        self.assertLessEqual(
+        self.assertEqual(
             len(found), MAX_FSTRING_LOG_CALLS,
-            f"f-string 로그 {len(found)}개(기준 {MAX_FSTRING_LOG_CALLS}). {FIX_HINT}",
+            f"f-string 로그 금지. {len(found)}개 발견. {FIX_HINT}",
         )
 
     def test_rule_catches_a_new_fstring_log(self):

@@ -78,15 +78,14 @@ def find_arbitrage(
     for marketplace in marketplace_products:
         kream_list = kream_products_map.get(marketplace.model_name, [])
         if not kream_list:
-            logger.debug(f"[{marketplace.model_name}] Kream 데이터 없음 — 건너뜀")
+            logger.debug("[%s] Kream 데이터 없음 — 건너뜀", marketplace.model_name)
             continue
 
         for kream in kream_list:
             total_pairs += 1
             if not model_numbers_match(marketplace.model_name, kream.model_name):
                 logger.warning(
-                    f"[{marketplace.model_name}] Kream 모델번호 불일치 — "
-                    f"actual={kream.model_name!r}, url={kream.kream_url} 건너뜀"
+                    "[%s] Kream 모델번호 불일치 — actual=%r, url=%s 건너뜀", marketplace.model_name, kream.model_name, kream.kream_url
                 )
                 continue
 
@@ -95,9 +94,7 @@ def find_arbitrage(
 
             if not _is_opportunity(effective, kream.kream_price, kream.trade_count):
                 logger.debug(
-                    f"[{marketplace.model_name}] 필터 탈락 — "
-                    f"가격차={price_diff:,}원 (기준: {MIN_PRICE_DIFF:,}), "
-                    f"거래량={kream.trade_count} (기준: {MIN_TRADE_COUNT})"
+                    "[%s] 필터 탈락 — 가격차=%s원 (기준: %s), 거래량=%s (기준: %s)", marketplace.model_name, format(price_diff, ","), format(MIN_PRICE_DIFF, ","), kream.trade_count, MIN_TRADE_COUNT
                 )
                 continue
 
@@ -115,19 +112,14 @@ def find_arbitrage(
             )
             results.append(result)
             logger.info(
-                f"[{marketplace.model_name}] 차익 발견 — "
-                f"마켓플레이스({marketplace.site_name})={effective:,}원, "
-                f"Kream={kream.kream_price:,}원, "
-                f"차익={price_diff:,}원, 거래량={kream.trade_count}"
+                "[%s] 차익 발견 — 마켓플레이스(%s)=%s원, Kream=%s원, 차익=%s원, 거래량=%s", marketplace.model_name, marketplace.site_name, format(effective, ","), format(kream.kream_price, ","), format(price_diff, ","), kream.trade_count
             )
 
     # price_diff 내림차순 정렬 (수익성 높은 순)
     results.sort(key=lambda r: r.price_diff, reverse=True)
 
     logger.info(
-        f"비교 완료 — 전체 조합: {total_pairs}개, "
-        f"차익 가능: {passed_pairs}개 "
-        f"(거래량 기준: >={MIN_TRADE_COUNT}, 가격차 기준: >={MIN_PRICE_DIFF:,}원)"
+        "비교 완료 — 전체 조합: %s개, 차익 가능: %s개 (거래량 기준: >=%s, 가격차 기준: >=%s원)", total_pairs, passed_pairs, MIN_TRADE_COUNT, format(MIN_PRICE_DIFF, ",")
     )
 
     if not results:

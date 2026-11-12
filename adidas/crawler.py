@@ -236,21 +236,21 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
     products: list[MarketplaceProduct] = []
     for card in cards_data:
         if card["isKids"]:
-            logger.debug(f"Kids 상품 제외: {card['name']!r}")
+            logger.debug("Kids 상품 제외: %r", card['name'])
             continue
 
         if not card["code"] or not card["name"] or not card["salePriceStr"]:
-            logger.debug(f"필수 정보 누락 — 건너뜀: {card}")
+            logger.debug("필수 정보 누락 — 건너뜀: %s", card)
             continue
 
         if card["code"] in seen_codes:
-            logger.debug(f"중복 상품코드 — 건너뜀: {card['code']}")
+            logger.debug("중복 상품코드 — 건너뜀: %s", card['code'])
             continue
 
         try:
             price = int(card["salePriceStr"].replace(",", ""))
         except ValueError:
-            logger.warning(f"가격 파싱 실패: {card['salePriceStr']!r}")
+            logger.warning("가격 파싱 실패: %r", card['salePriceStr'])
             continue
 
         seen_codes.add(card["code"])
@@ -263,7 +263,7 @@ async def _extract_products(page, card_selector: str, seen_codes: set[str]) -> l
             crawled_at=crawled_at,
         ))
         logger.info(
-            f"수집: {card['name']!r} | 코드={card['code']} | 가격={price:,}원"
+            "수집: %r | 코드=%s | 가격=%s원", card['name'], card['code'], format(price, ",")
         )
 
     return products

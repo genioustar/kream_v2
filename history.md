@@ -1,5 +1,10 @@
 # 변경 히스토리
 
+## 2026-11-12 — f-string 로그를 lazy %-formatting으로 바꿈
+
+- [로깅] 제품 코드의 f-string 로그 107개를 `logger.*(포맷, 인자)`로 바꿨다. 문구는 그대로다. `{값}`는 `%s`, `{값!r}`는 `%r`, `{값:.1f}`는 `%.1f`, `{값:,}`는 `format(값, ",")`를 `%s`에 넘긴다. `time.monotonic()` 3곳과 `await page.title()` 1곳은 인자에서 한 번씩만 평가된다.
+- [하네스] `tests/test_rule_logging.py`의 `MAX_FSTRING_LOG_CALLS`는 0이다. f-string 로그는 금지다.
+
 ## 2026-11-12 — TMPDIR 은 SessionStart 훅이 지정하고 루트를 만든다
 
 - [하네스] TMPDIR 은 SessionStart 훅이 CLAUDE_ENV_FILE 로 지정하고 루트를 만든다 — 실측: settings env.TMPDIR 은 적용되지 않음(다른 변수는 적용), SessionStart export 는 Bash·tempfile 에 적용
@@ -9,6 +14,7 @@
 - [하네스] 남은 한계: Grok worker 가 SessionStart·CLAUDE_ENV_FILE 을 쓰는지는 미확인이다. 따옴표로 감싼 `"$TMPDIR/x"` 와 `${TMPDIR:-...}` 우회는 그대로다(별도 작업).
 - [하네스] 남은 한계: Claude 세션에서 SessionStart 가 실패하면(실행 권한 없음·훅 오류·CLAUDE_ENV_FILE 미지원) Bash TMPDIR 은 /var/folders 로 남는데 훅은 Claude payload 의 $TMPDIR 쓰기를 허용하므로 막지 못한다(수용 위험).
 - [테스트] `session-tmpdir.py`의 main 은 subprocess 로 돌리지 않는다. main 이 실제 `ALLOWED_ROOTS[0]`를 만들어 CI 에서 그 경로를 건드리거나 권한 때문에 실패할 수 있어, `prepare` 단위 테스트와 루트를 임시 경로로 바꾼 in-process `main` 호출로 대체했다.
+
 
 ## 2026-11-12 — 시스템 임시 디렉터리 쓰기를 TMPDIR 과 훅으로 막음
 

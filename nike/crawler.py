@@ -82,7 +82,7 @@ async def _collect_via_api(
         try:
             data = await response.json()
             if log_first:
-                logger.info(f"[DIAG] API 첫 응답 샘플: {json.dumps(data, ensure_ascii=False)[:400]}")
+                logger.info("[DIAG] API 첫 응답 샘플: %s", json.dumps(data, ensure_ascii=False)[:400])
                 log_first = False
             groupings = data.get("productGroupings") or []
             products_list = [p for g in groupings for p in (g.get("products") or [])]
@@ -93,35 +93,35 @@ async def _collect_via_api(
                     key = p.url or p.model_name
                     if key and key not in seen:
                         seen[key] = p
-                        logger.info(f"수집: {p.product_name!r} | {p.model_name} | {p.price:,}원")
-            logger.info(f"API 배치 {len(products_list)}개, 신규 {len(seen) - before}개, 누적 {len(seen)}개")
+                        logger.info("수집: %r | %s | %s원", p.product_name, p.model_name, format(p.price, ","))
+            logger.info("API 배치 %s개, 신규 %s개, 누적 %s개", len(products_list), len(seen) - before, len(seen))
         except Exception as exc:
-            logger.debug(f"API 응답 파싱 오류: {exc}")
+            logger.debug("API 응답 파싱 오류: %s", exc)
 
     page.on("response", on_api_response)
 
     scroll_stall_streak = 0
     for attempt in range(MAX_SCROLL_ATTEMPTS):
         if len(seen) >= target_count:
-            logger.info(f"목표 달성 ({len(seen)} >= {target_count}) → 종료")
+            logger.info("목표 달성 (%s >= %s) → 종료", len(seen), target_count)
             break
 
         prev_y: int = await page.evaluate("() => window.scrollY")
         await page.evaluate(f"window.scrollBy(0, {SCROLL_STEP_PX})")
         await page.wait_for_timeout(SCROLL_STEP_DELAY_MS)
         curr_y: int = await page.evaluate("() => window.scrollY")
-        logger.info(f"스크롤 {attempt + 1}회 — scrollY: {prev_y}→{curr_y}, 누적: {len(seen)}개")
+        logger.info("스크롤 %s회 — scrollY: %s→%s, 누적: %s개", attempt + 1, prev_y, curr_y, len(seen))
 
         if curr_y == prev_y:
             scroll_stall_streak += 1
             if scroll_stall_streak >= NO_CHANGE_LIMIT:
-                logger.info(f"페이지 끝 도달 → 종료")
+                logger.info("페이지 끝 도달 → 종료")
                 break
         else:
             scroll_stall_streak = 0
 
     products = list(seen.values())
-    logger.info(f"수집 완료 — 총 {len(products)}개")
+    logger.info("수집 완료 — 총 %s개", len(products))
     return products
 
 
@@ -184,11 +184,11 @@ def _parse_api_product(item: dict, crawled_at: str) -> MarketplaceProduct | None
         url = pdp_url.get("url")  # 이미 절대 URL
 
         if _should_exclude((title or "") + " " + (subtitle or ""), subtitle):
-            logger.debug(f"Kids 필터 제외: {title!r}")
+            logger.debug("Kids 필터 제외: %r", title)
             return None
 
         if not title or price_val is None or not url:
-            logger.debug(f"필수 정보 누락: title={title!r}, price={price_val}, url={url!r}")
+            logger.debug("필수 정보 누락: title=%r, price=%s, url=%r", title, price_val, url)
             return None
 
         model_name = (
@@ -206,7 +206,7 @@ def _parse_api_product(item: dict, crawled_at: str) -> MarketplaceProduct | None
             crawled_at=crawled_at,
         )
     except Exception as exc:
-        logger.debug(f"_parse_api_product 오류: {exc}")
+        logger.debug("_parse_api_product 오류: %s", exc)
         return None
 
 
@@ -246,7 +246,7 @@ async def crawl_nike() -> list[MarketplaceProduct]:
     # 예) /kr/w/clearance-shoes-3yaepzy7ok → "clearance-shoes-3yaepzy7ok"
     expected_segment = urlparse(sale_url).path.rstrip("/").rsplit("/", 1)[-1]
 
-    logger.info(f"나이키 세일 페이지 이동 중: {sale_url}")
+    logger.info("나이키 세일 페이지 이동 중: %s", sale_url)
 
     async with create_browser() as context:
         page = await context.new_page()
@@ -259,19 +259,19 @@ async def crawl_nike() -> list[MarketplaceProduct]:
                     timeout=PAGE_LOAD_TIMEOUT_MS,
                 )
             except Exception as exc:
-                logger.warning(f"goto 에러(계속 진행): {type(exc).__name__}: {exc}")
+                logger.warning("goto 에러(계속 진행): %s: %s", type(exc).__name__, exc)
 
             final_url = page.url
             page_title = await page.title()
-            logger.info(f"페이지 로드 완료 — URL: {final_url} | 제목: {page_title!r}")
+            logger.info("페이지 로드 완료 — URL: %s | 제목: %r", final_url, page_title)
 
             if expected_segment and expected_segment not in final_url:
-                logger.warning(f"세일 URL에서 다른 페이지로 이동됨. 현재 URL: {final_url}")
+                logger.warning("세일 URL에서 다른 페이지로 이동됨. 현재 URL: %s", final_url)
 
             await asyncio.sleep(PAGE_SETTLE_SEC)
 
             products = await _collect_via_api(page)
-            logger.info(f"나이키 크롤링 완료 — 총 {len(products)}개")
+            logger.info("나이키 크롤링 완료 — 총 %s개", len(products))
             return products
 
         finally:

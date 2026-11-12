@@ -96,10 +96,10 @@ def _load_all_products(output_dir: Path) -> list[MarketplaceProduct]:
     for fpath in sorted(output_dir.glob("*_products.json")):
         try:
             items = _load_products_json(fpath)
-            logger.info(f"{fpath.name} 로드 — {len(items)}개")
+            logger.info("%s 로드 — %s개", fpath.name, len(items))
             all_products.extend(items)
         except Exception as exc:
-            logger.warning(f"{fpath.name} 로드 실패 (건너뜀): {exc}")
+            logger.warning("%s 로드 실패 (건너뜀): %s", fpath.name, exc)
     return all_products
 
 
@@ -204,7 +204,7 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
     base_output_dir = Path(__file__).parent / config.OUTPUT_DIR
 
     logger.info("=" * 60)
-    logger.info(f"실행 모드: {mode.upper()}")
+    logger.info("실행 모드: %s", mode.upper())
     logger.info("=" * 60)
 
     # =========================================================================
@@ -229,7 +229,7 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
         if mode == "crawl":
             all_products = _load_all_products(output_dir)
             logger.info("=" * 60)
-            logger.info(f"crawl 모드 완료 — 전체 수집: {len(all_products)}개")
+            logger.info("crawl 모드 완료 — 전체 수집: %s개", len(all_products))
             logger.info("=" * 60)
             return
 
@@ -259,12 +259,12 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
             if mn and mn not in seen:
                 seen.add(mn)
                 unique_models.append(mn)
-        logger.info(f"전체 크롤 날짜({day}일) — 고유 모델명 {len(unique_models)}개")
+        logger.info("전체 크롤 날짜(%s일) — 고유 모델명 %s개", day, len(unique_models))
     else:
         # 그 외 날짜 (kream 모드 포함): diff가 있으면 diff 기반, 없으면 전체 모델명 사용
         all_dates = discover_dates(base_output_dir)
         if len(all_dates) >= 2:
-            logger.info(f"diff 기반 — diff 생성: {all_dates[-2]} → {all_dates[-1]}")
+            logger.info("diff 기반 — diff 생성: %s → %s", all_dates[-2], all_dates[-1])
             diff_files = diff_date_pair(all_dates[-2], all_dates[-1], base_output_dir)
             for diff_file in diff_files:
                 for mn in _extract_models_from_diff(diff_file):
@@ -272,7 +272,7 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
                         seen.add(mn)
                         unique_models.append(mn)
             if unique_models:
-                logger.info(f"diff 기반 — 변경된 모델명 {len(unique_models)}개")
+                logger.info("diff 기반 — 변경된 모델명 %s개", len(unique_models))
             else:
                 logger.info("변경된 모델 없음 — Kream 검색 생략")
         else:
@@ -294,12 +294,11 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
             for i in range(0, len(unique_models), KREAM_CHUNK_SIZE)
         ]
         logger.info(
-            f"고유 모델명 {len(unique_models)}개 → "
-            f"{len(model_chunks)}개 청크로 분할 (청크당 최대 {KREAM_CHUNK_SIZE}개, 추가 휴식 없음)"
+            "고유 모델명 %s개 → %s개 청크로 분할 (청크당 최대 %s개, 추가 휴식 없음)", len(unique_models), len(model_chunks), KREAM_CHUNK_SIZE
         )
     else:
         model_chunks = [unique_models]
-        logger.info(f"고유 모델명 {len(unique_models)}개 → Kream 단일 탭 순차 검색 시작")
+        logger.info("고유 모델명 %s개 → Kream 단일 탭 순차 검색 시작", len(unique_models))
 
     arbitrage_results: list = []
     total_kream = 0
@@ -309,7 +308,7 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
     for chunk_idx, chunk in enumerate(model_chunks):
         chunk_label = f"청크 [{chunk_idx + 1}/{len(model_chunks)}]"
         logger.info("=" * 60)
-        logger.info(f"STEP 2~3 {chunk_label}: Kream 검색 + 차익 비교 ({len(chunk)}개)")
+        logger.info("STEP 2~3 %s: Kream 검색 + 차익 비교 (%s개)", chunk_label, len(chunk))
         logger.info("=" * 60)
 
         kream_products_map: dict = {}
@@ -321,14 +320,14 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
                     kream_products_map[mn] = products
         except Exception as exc:
             search_error = exc
-            logger.error(f"{chunk_label} 검색 중단 — 완료 결과를 저장합니다: {exc}")
+            logger.error("%s 검색 중단 — 완료 결과를 저장합니다: %s", chunk_label, exc)
 
         if search_error is not None and not kream_products_map:
             raise search_error
 
         chunk_kream = sum(len(v) for v in kream_products_map.values())
         total_kream += chunk_kream
-        logger.info(f"{chunk_label} Kream 수집 완료 — {chunk_kream}개")
+        logger.info("%s Kream 수집 완료 — %s개", chunk_label, chunk_kream)
 
         # 차익 비교 후 누적
         chunk_results = find_arbitrage(all_products, kream_products_map)
@@ -344,10 +343,10 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
                 arb_dicts.append(mark_result(d, previous_prices))
             write_json_atomic(arb_output, arb_dicts)
             logger.info(
-                f"{chunk_label} 누적 차익 {len(arbitrage_results)}개 저장 → {arb_output}"
+                "%s 누적 차익 %s개 저장 → %s", chunk_label, len(arbitrage_results), arb_output
             )
         except Exception as exc:
-            logger.error(f"{RESULT_FILENAME} 저장 실패: {exc}")
+            logger.error("%s 저장 실패: %s", RESULT_FILENAME, exc)
             raise
 
         if search_error is not None:
@@ -367,7 +366,7 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
             else:
                 logger.info("이전 날짜 데이터가 없어 변경분 비교를 건너뜁니다.")
         except Exception as exc:
-            logger.warning(f"변경분 비교 중 오류 발생 (파이프라인은 계속): {exc}")
+            logger.warning("변경분 비교 중 오류 발생 (파이프라인은 계속): %s", exc)
     else:
         if mode == "full":
             logger.info("STEP 4: diff는 STEP 2 전에 이미 생성됨 — 건너뜀")
@@ -378,11 +377,11 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
     # 완료 요약
     # =========================================================================
     logger.info("=" * 60)
-    logger.info(f"파이프라인 완료 ({mode.upper()} 모드)")
-    logger.info(f"  전체 수집:  {len(all_products)}개")
-    logger.info(f"  Kream 수집: {total_kream}개")
-    logger.info(f"  차익 기회:  {len(arbitrage_results)}개")
-    logger.info(f"  결과 파일:  {arb_output}")
+    logger.info("파이프라인 완료 (%s 모드)", mode.upper())
+    logger.info("  전체 수집:  %s개", len(all_products))
+    logger.info("  Kream 수집: %s개", total_kream)
+    logger.info("  차익 기회:  %s개", len(arbitrage_results))
+    logger.info("  결과 파일:  %s", arb_output)
     logger.info("=" * 60)
 
 

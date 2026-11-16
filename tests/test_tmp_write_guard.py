@@ -12,22 +12,35 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
 HOOK = Path(__file__).resolve().parent.parent / ".claude" / "hooks" / "block-tmp-writes.py"
+HEAD_HOOK = Path(__file__).resolve().parent / "fixtures" / "block_tmp_writes_head.py"
 SCRATCH = "/private/tmp/claude-501/-Users-ny-Documents-programs-resell-sniper/session/scratchpad"
 HOOK_TIMEOUT_SEC = 10
+# 앞에 큰따옴표 하나와 이 횟수만큼 붙인 입력(약 99k자).
+UNBALANCED_QUOTE_REPEAT = 9000
+# redos5 형태: 한 세그먼트에 연산자와 경로가 이 횟수만큼 반복된다.
+REDOS_OPERATOR_REPEAT = 3000
+SHELL_NEST_DEPTH = 9
+HOOK_PERF_MAX_SEC = 1
+
+
+def load_module(path: Path, name: str):
+    """하이픈이 있는 파일을 모듈로 불러온다."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"모듈을 불러오지 못함: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_hook():
     """하이픈이 있는 훅 파일을 모듈로 불러 ALLOWED_ROOTS 를 읽는다."""
-    spec = importlib.util.spec_from_file_location("block_tmp_writes", HOOK)
-    if spec is None or spec.loader is None:
-        raise AssertionError(f"훅 모듈을 불러오지 못함: {HOOK}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module(HOOK, "block_tmp_writes")
 
 
 def run_hook_payload(payload: dict, env: dict | None = None, hook: Path = HOOK) -> dict | None:
@@ -285,6 +298,258 @@ class SystemTempTests(unittest.TestCase):
         commands = [hook["command"] for group in groups for hook in group["hooks"]]
         self.assertTrue(any("session-tmpdir.py" in command for command in commands), commands)
         self.assertTrue(all("matcher" not in group for group in groups))
+
+
+class QuoteAndExpansionTests(unittest.TestCase):
+    """따옴표로 감싼 쓰기 대상과 ${TMPDIR:-기본값} 매개변수 확장."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.hook = load_hook()
+        cls.head = load_module(HEAD_HOOK, "block_tmp_writes_head")
+        cls.system_env = os.environ.copy()
+        cls.system_env["TMPDIR"] = "/var/folders/xx/T/"
+        cls.root_env = os.environ.copy()
+        cls.root_env["TMPDIR"] = cls.hook.ALLOWED_ROOTS[0]
+        cls.allowed_root = cls.hook.ALLOWED_ROOTS[0].rstrip("/")
+
+    def assert_denied(self, command: str, *, grok_style: bool, env: dict) -> None:
+        reply = run_hook("Bash", {"command": command}, grok_style=grok_style, env=env)
+        self.assertTrue(is_denied(reply), f"차단되어야 함: {command} grok={grok_style} -> {reply}")
+
+    def assert_allowed(self, command: str, *, grok_style: bool, env: dict) -> None:
+        reply = run_hook("Bash", {"command": command}, grok_style=grok_style, env=env)
+        self.assertFalse(is_denied(reply), f"통과해야 함: {command} grok={grok_style} -> {reply}")
+
+    def test_quoted_literal_redirects_denied(self):
+        commands = (
+            'echo x > "/tmp/a"',
+            "echo x > '/tmp/a'",
+            'echo x > "/var/folders/xx/a"',
+            "echo x > '/var/folders/xx/a'",
+            'echo x >> "/tmp/a"',
+            'echo x >"/tmp/a"',
+            "echo x >>'/var/folders/xx/a'",
+        )
+        for command in commands:
+            for grok_style in (False, True):
+                with self.subTest(command=command, grok_style=grok_style):
+                    self.assert_denied(command, grok_style=grok_style, env=self.system_env)
+
+    def test_quoted_output_flags_denied(self):
+        commands = (
+            'curl -o "/tmp/page.html" https://example.com',
+            "curl --output '/tmp/page.html' https://example.com",
+            'curl -o="/tmp/page.html" https://example.com',
+            'dd if=/dev/zero of="/tmp/blob" bs=1 count=1',
+            "dd if=/dev/zero of='/var/folders/xx/blob' bs=1 count=1",
+        )
+        for command in commands:
+            for grok_style in (False, True):
+                with self.subTest(command=command, grok_style=grok_style):
+                    self.assert_denied(command, grok_style=grok_style, env=self.system_env)
+
+    def test_quoted_tmpdir_ref_follows_caller(self):
+        # 따옴표가 있어도 $TMPDIR 판정은 호출자별로 같다. Claude 는 허용, Grok 은 훅 TMPDIR 기준.
+        commands = (
+            'echo x > "$TMPDIR/x"',
+            'echo x > "${TMPDIR}/x"',
+            "echo x > '$TMPDIR/x'",
+        )
+        for command in commands:
+            with self.subTest(command=command, who="claude"):
+                self.assert_allowed(command, grok_style=False, env=self.system_env)
+            with self.subTest(command=command, who="grok-system"):
+                self.assert_denied(command, grok_style=True, env=self.system_env)
+            with self.subTest(command=command, who="grok-root"):
+                self.assert_allowed(command, grok_style=True, env=self.root_env)
+
+    def test_expansion_temp_default_denied_for_every_caller(self):
+        commands = (
+            "echo x > ${TMPDIR:-/tmp}/x",
+            'echo x > "${TMPDIR:-/tmp}/x"',
+            "echo x > ${TMPDIR:=/tmp}/x",
+            "echo x > ${TMPDIR-/tmp}/x",
+            "echo x > ${TMPDIR=/var/folders/xx/a}",
+            "touch ${TMPDIR:-/tmp}/x",
+        )
+        envs = (("system", self.system_env), ("root", self.root_env))
+        for command in commands:
+            for grok_style in (False, True):
+                for name, env in envs:
+                    with self.subTest(command=command, grok_style=grok_style, env=name):
+                        self.assert_denied(command, grok_style=grok_style, env=env)
+
+    def test_expansion_allowed_default_follows_caller(self):
+        command = f"echo x > ${{TMPDIR:-{self.allowed_root}/x}}"
+        self.assert_allowed(command, grok_style=False, env=self.system_env)
+        self.assert_allowed(command, grok_style=False, env=self.root_env)
+        self.assert_denied(command, grok_style=True, env=self.system_env)
+        self.assert_allowed(command, grok_style=True, env=self.root_env)
+        # /tmpfoo 는 /tmp 가 아니다. Claude 는 통과하고 Grok 은 호출자 규칙만 적용한다.
+        lookalike = "echo x > ${TMPDIR:-/tmpfoo}/y"
+        self.assert_allowed(lookalike, grok_style=False, env=self.system_env)
+        self.assert_denied(lookalike, grok_style=True, env=self.system_env)
+        self.assert_allowed(lookalike, grok_style=True, env=self.root_env)
+
+    def test_quoted_write_commands_denied(self):
+        # _command_words 가 따옴표를 벗기므로 tee/touch/mkdir/cp 도 따옴표 경로를 쓴다.
+        commands = (
+            'tee "/tmp/out.log"',
+            "touch '/tmp/marker'",
+            'mkdir -p "/tmp/work"',
+            'cp scratch.txt "/tmp/copy.txt"',
+            f'cp "{SCRATCH}/a.txt" "/tmp/b.txt"',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_denied(command, grok_style=True, env=self.system_env)
+
+    def test_quoted_literals_and_reads_allowed(self):
+        commands = (
+            'echo "see /tmp/a"',
+            'cat "/tmp/a"',
+            "cat '/tmp/a'",
+            'rm "/tmp/a"',
+            "rm '/tmp/a'",
+            f'cp "/tmp/old.log" "{SCRATCH}/old.log"',
+            "echo x > $TMPDIR_OLD/x",
+            'echo x > "$TMPDIR_OLD/x"',
+        )
+        for command in commands:
+            for grok_style in (False, True):
+                with self.subTest(command=command, grok_style=grok_style):
+                    self.assert_allowed(command, grok_style=grok_style, env=self.system_env)
+
+    def test_head_false_positives_still_denied(self):
+        # HEAD 가 문자열 안의 > 를 그대로 본다. 이 오탐은 유지한다.
+        commands = (
+            'grep "> /tmp" file',
+            "grep '> /tmp' file",
+            'echo "echo > /tmp/x"',
+            'bash -c "grep \\"> /tmp\\" file"',
+            "bash -c 'grep \"> /tmp\" file'",
+            'git commit -m "fix: echo > /tmp/x"',
+        )
+        for command in commands:
+            for grok_style in (False, True):
+                with self.subTest(command=command, grok_style=grok_style):
+                    self.assert_denied(command, grok_style=grok_style, env=self.system_env)
+
+    def test_wrapped_shell_writes_denied(self):
+        # HEAD 판정이 감싼 명령 안의 >·-o 를 그대로 본다.
+        nested = "echo > /tmp/a"
+        for _ in range(SHELL_NEST_DEPTH):
+            nested = "bash -c '" + nested + "'"
+        commands = (
+            'bash -c "echo x > /tmp/a"',
+            "sh -c 'echo x > /tmp/a'",
+            'eval "echo x > /tmp/a"',
+            "timeout 5 bash -c 'curl -o /tmp/a http://e'",
+            'timeout -s KILL 5 bash -c "echo > /tmp/a"',
+            'sudo -u root bash -c "echo > /tmp/a"',
+            'bash -o pipefail -c "echo > /tmp/a"',
+            'nice bash -c "echo > /tmp/a"',
+            'time bash -c "echo > /tmp/a"',
+            'stdbuf -oL bash -c "echo > /tmp/a"',
+            'xargs sh -c "echo > /tmp/a"',
+            "find . -name x -exec sh -c 'cat {} > /tmp/a' \\;",
+            'su -c "echo > /tmp/a"',
+            'script -q -c "echo > /tmp/a" /dev/null',
+            """python3 -c "import os; os.system('echo > /tmp/a')" """,
+            nested,
+            'echo \\"x > /tmp/a',
+        )
+        for command in commands:
+            for grok_style in (False, True):
+                with self.subTest(command=command, grok_style=grok_style):
+                    self.assert_denied(command, grok_style=grok_style, env=self.system_env)
+
+    def test_head_deny_implies_final_deny(self):
+        """fixture(577f2f9 고정 복사)가 막으면 현재 훅도 막는다."""
+        nested = "echo > /tmp/a"
+        for _ in range(SHELL_NEST_DEPTH):
+            nested = "bash -c '" + nested + "'"
+        commands = [
+            "printf '%s' \"$body\" > /tmp/bundle1b-body.txt",
+            "echo x >> /private/tmp/report.md",
+            "tee /tmp/out.log",
+            "touch /tmp/marker",
+            "mkdir -p /tmp/work",
+            "cp scratch.txt /tmp/copy.txt",
+            "curl -o /tmp/page.html https://example.com",
+            "dd if=/dev/zero of=/tmp/blob bs=1 count=1",
+            "cd x && python3 -c \"open('/tmp/x.json', 'w').write('{}')\"",
+            "cat > /tmp/notes.md <<'EOF'\nhello\nEOF",
+            "ls /tmp",
+            "cat /tmp/ssf-init-check.py | head -3",
+            "rm -f /tmp/ssf-init-check.py",
+            f"cp /tmp/old.log {SCRATCH}/old.log",
+            f"echo ok > {SCRATCH}/out.txt",
+            'echo x > "/tmp/a"',
+            "echo x > '/tmp/a'",
+            'echo x > "$TMPDIR/x"',
+            "echo x > ${TMPDIR:-/tmp}/x",
+            'grep "> /tmp" file',
+            "grep '> /tmp' file",
+            'echo "see /tmp/a"',
+            'echo "echo > /tmp/x"',
+            'cat "/tmp/a"',
+            "cat '/tmp/a'",
+            'rm "/tmp/a"',
+            'tee "/tmp/out.log"',
+            "touch '/tmp/marker'",
+            'cp scratch.txt "/tmp/copy.txt"',
+            'bash -c "echo x > /tmp/a"',
+            "sh -c 'echo x > /tmp/a'",
+            'eval "echo x > /tmp/a"',
+            "timeout 5 bash -c 'curl -o /tmp/a http://e'",
+            'timeout -s KILL 5 bash -c "echo > /tmp/a"',
+            'sudo -u root bash -c "echo > /tmp/a"',
+            'bash -o pipefail -c "echo > /tmp/a"',
+            'nice bash -c "echo > /tmp/a"',
+            'time bash -c "echo > /tmp/a"',
+            'stdbuf -oL bash -c "echo > /tmp/a"',
+            'xargs sh -c "echo > /tmp/a"',
+            "find . -name x -exec sh -c 'cat {} > /tmp/a' \\;",
+            'su -c "echo > /tmp/a"',
+            'script -q -c "echo > /tmp/a" /dev/null',
+            """python3 -c "import os; os.system('echo > /tmp/a')" """,
+            nested,
+            'echo \\"x > /tmp/a',
+            'grep -o "/tmp" file',
+            'echo of="/tmp/a"',
+        ]
+        callers = (
+            (self.hook.CALLER_CLAUDE, self.system_env),
+            (self.hook.CALLER_GROK, self.system_env),
+            (self.hook.CALLER_GROK, self.root_env),
+        )
+        for command in commands:
+            for caller, env in callers:
+                head = self.head._blocked_command_path(command, env, caller)
+                if head is None:
+                    continue
+                final = self.hook._blocked_command_path(command, env, caller)
+                with self.subTest(command=command, caller=caller):
+                    self.assertIsNotNone(final, f"HEAD 가 막음({head})인데 최종은 통과: {command}")
+
+    def test_unbalanced_quote_repeat_finishes_within_limit(self):
+        command = '"' + "x > /tmp/a " * UNBALANCED_QUOTE_REPEAT
+        started = time.monotonic()
+        self.assert_denied(command, grok_style=True, env=self.system_env)
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, HOOK_PERF_MAX_SEC, f"{elapsed:.3f}s")
+
+    def test_many_operators_finish_within_limit(self):
+        parts = " ".join(
+            f"if a > 1: p('/tmp/f{index % 3}')" for index in range(REDOS_OPERATOR_REPEAT)
+        )
+        command = 'python3 -c "' + parts + '"'
+        started = time.monotonic()
+        self.assert_allowed(command, grok_style=True, env=self.system_env)
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, HOOK_PERF_MAX_SEC, f"{elapsed:.3f}s")
 
 
 if __name__ == "__main__":

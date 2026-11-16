@@ -154,7 +154,9 @@ resell-sniper/
 │   ├── test_rule_crawler_except.py # 저장소 규칙: 크롤러 except 에서 raise 없이 break 금지, CrawlBlockedError 삼킴 금지
 │   ├── test_rule_docs_sync.py    # 저장소 규칙: 이 tests 트리와 SITE_DISCOUNT_RATES 표가 실제 파일·config.py 와 일치
 │   ├── test_logger.py            # setup_logging 포맷·멱등·DEBUG 파일/서드파티 INFO 필터·임시 로그 디렉터리·subprocess import 시 핸들러 0·mkdir 0회
-│   └── test_rule_logging.py      # 저장소 규칙: f-string 로그 금지, setup_logging() 이 __main__ 첫 문장, PROJECT_LOGGERS 정합성, dictConfig·fileConfig 금지
+│   ├── test_rule_logging.py      # 저장소 규칙: f-string 로그 금지, setup_logging() 이 __main__ 첫 문장, PROJECT_LOGGERS 정합성, dictConfig·fileConfig 금지
+│   └── fixtures/
+│       └── block_tmp_writes_head.py  # 577f2f9 훅 고정 복사. 수정 금지. HEAD 판정 오라클
 
 ├── requirements.txt
 └── venv/
@@ -387,6 +389,13 @@ resell-sniper/
 | `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |
 | `SITE_DISCOUNT_RATES` | marketplace 0%, adidas 20%, musinsa 0%, nike 0%, special 0%, ssfshop 0% | 소스 크롤러별 수동 할인율 (%). 0이면 sale_price 미산출 |
+
+### .claude/hooks/block-tmp-writes.py
+- PreToolUse 훅 `main`. scratchpad(`ALLOWED_ROOTS`) 밖 `/tmp`·`/var/folders` 쓰기와, 호출자에게 허용되지 않은 `$TMPDIR`·`${TMPDIR}`·`${TMPDIR:-기본값}` 쓰기를 막는다. 파싱에 실패하면 통과한다.
+- `caller_kind`는 snake_case 키만 있으면 Claude, 아니면 Grok이다. `tmpdir_write_allowed` 는 Claude 를 허용하고, Grok 은 훅 환경 `TMPDIR` 이 `ALLOWED_ROOTS` 안일 때만 허용한다. 리터럴 경로와 파일 쓰기 도구(`file_path`·`path` 등)는 호출자와 무관하다.
+- `_writes_to`는 HEAD 판정이다. 따옴표 안이어도 `>`·`-o`·`of=`·`open`·`tee`/`cp` 뒤에 경로가 있으면 막는다. `_blocked_command_path`는 그 판정에, 따옴표로 감싼 리다이렉트·`-o`/`--output`·`of=` 대상과 `${TMPDIR:-기본값}` 류를 더한다. 경로 후보는 세그먼트마다 `dict.fromkeys`로 한 번만 본다. HEAD가 막는지는 `tests/fixtures/block_tmp_writes_head.py`를 importlib로 불러 검사한다. 그 파일은 577f2f9 훅의 고정 복사다.
+- `HEAD_TMPDIR_REF_RE`는 `$TMPDIR`·`${TMPDIR}` 만 본다. `TMPDIR_DEFAULT_OP` 는 `:-` `:=` `-` `=` `:+` `+` `:?` `?` 다. 기본값에 허용 루트 밖 `/tmp`·`/var/folders` 가 있으면 호출자와 무관하게 막는다.
+- `tee`·`touch`·`mkdir` 은 따옴표를 벗긴 인자 전체를, `cp`·`mv`·`install`·`rsync`·`ln` 은 마지막 목적지를 본다. 읽기와 `rm`, 임시 경로에서 scratchpad 로 가져오는 복사는 허용한다.
 
 ## 새 크롤링 소스 추가 방법
 

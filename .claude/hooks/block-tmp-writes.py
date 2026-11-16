@@ -2,8 +2,9 @@
 """
 PreToolUse 훅: scratchpad 루트 밖 임시 경로에 쓰는 도구 호출을 막는다.
 
-대상은 /tmp·/private/tmp, macOS 시스템 임시 경로(/var/folders·/private/var/folders),
-그리고 명령 문자열의 $TMPDIR·${TMPDIR} 이다.
+HEAD 판정(_writes_to)은 그대로다. 따옴표 안이어도 >·-o·of= 뒤에 경로가 있으면 막는다.
+그 위에만 덧붙인다. 리다이렉트·-o·of= 의 대상이 따옴표로 감싸진 경우, 그리고
+${TMPDIR:-기본값} 같은 매개변수 확장이다.
 
 실측(2026-11-12, headless claude -p 새 세션): settings.json 의 env.TMPDIR 은
 Bash·Python·이 훅에 적용되지 않는다(같은 env 의 다른 변수는 적용됨).
@@ -44,8 +45,24 @@ CALLER_GROK = "grok"
 PATH_TOKEN_TAIL = r"[^\s'\"|;&<>()`]*"
 TMP_PATH_RE = re.compile(rf"(?:/private)?/tmp(?:/{PATH_TOKEN_TAIL})?")
 VAR_FOLDERS_PATH_RE = re.compile(rf"(?:/private)?/var/folders(?:/{PATH_TOKEN_TAIL})?")
-# $TMPDIR 뒤에 식별자가 더 붙으면($TMPDIR_FOO) 다른 변수이므로 제외한다.
-TMPDIR_REF_RE = re.compile(rf"\$(?:\{{TMPDIR\}}|TMPDIR)(?![A-Za-z0-9_])(?:/{PATH_TOKEN_TAIL})?")
+# HEAD 가 보던 $TMPDIR·${TMPDIR}. 기본값 연산자는 포함하지 않는다.
+HEAD_TMPDIR_REF_RE = re.compile(
+    rf"\$(?:\{{TMPDIR\}}|TMPDIR)(?![A-Za-z0-9_])(?:/{PATH_TOKEN_TAIL})?"
+)
+# ${TMPDIR:-word} ${TMPDIR-word} ${TMPDIR:=word} ${TMPDIR=word}
+# ${TMPDIR:+word} ${TMPDIR+word} ${TMPDIR:?word} ${TMPDIR?word}. word 는 첫 } 앞까지다.
+TMPDIR_DEFAULT_OP = r"(?::[-+=?]|[-+=?])"
+TMPDIR_REF_RE = re.compile(
+    rf"\$(?:\{{TMPDIR(?:{TMPDIR_DEFAULT_OP}[^}}]*)?\}}|TMPDIR)(?![A-Za-z0-9_])(?:/{PATH_TOKEN_TAIL})?"
+)
+TMPDIR_DEFAULT_RE = re.compile(rf"\$\{{TMPDIR{TMPDIR_DEFAULT_OP}([^}}]*)\}}")
+# 추가 판정용. 따옴표로 감싼 리다이렉트·-o·of= 대상만 본다.
+_QUOTED_REDIRECT_RE = re.compile(r">{1,2}\s*['\"]([^\s'\"]*)")
+_QUOTED_OUTPUT_RE = re.compile(
+    r"(?:^|\s)(?:-o|--output)(?:=|\s+)['\"]([^\s'\"]*)"
+)
+_QUOTED_OF_RE = re.compile(r"(?:^|\s)of=['\"]([^\s'\"]*)")
+_QUOTED_TARGET_RES = (_QUOTED_REDIRECT_RE, _QUOTED_OUTPUT_RE, _QUOTED_OF_RE)
 TMP_EXACT = "/tmp"
 TMP_PREFIXES = ("/tmp/", "/private/tmp")
 VAR_FOLDERS_EXACT = "/var/folders"
@@ -137,8 +154,11 @@ def _command_words(segment: str) -> list[str]:
     return words
 
 
-def _writes_to(segment: str, path: str) -> bool:
-    """명령 한 조각이 그 임시 경로에 쓰는지 본다. 읽기와 rm 은 쓰기로 보지 않는다."""
+def _writes_to(segment: str, path: str, words: list[str] | None = None) -> bool:
+    """HEAD 판정. 명령 한 조각이 그 임시 경로에 쓰는지 본다. 읽기와 rm 은 쓰기로 보지 않는다.
+
+    따옴표 안이어도 연산자 바로 뒤에 경로가 있으면 참이다. words 를 넘기면 세그먼트에서 다시 쪼개지 않는다.
+    """
     escaped = re.escape(path)
     if re.search(r">{1,2}\s*" + escaped, segment):
         return True
@@ -148,7 +168,8 @@ def _writes_to(segment: str, path: str) -> bool:
         return True
     if re.search(r"(?:^|\s)of=" + escaped, segment):
         return True
-    words = _command_words(segment)
+    if words is None:
+        words = _command_words(segment)
     if not words:
         return False
     if words[0] in WRITE_ALL_ARGS_COMMANDS:
@@ -164,21 +185,86 @@ def _strip_heredoc_bodies(command: str) -> str:
     return HEREDOC_BODY_RE.sub(lambda match: match.group(0).split("\n", 1)[0], command)
 
 
+def _token_boundary(text: str, end: int) -> bool:
+    """매치 끝이 경로 토큰의 끝인지. /tmpfoo 의 /tmp 처럼 접두만 맞은 것은 아니다."""
+    if end >= len(text):
+        return True
+    return text[end] in " \t\r\n'\"|;&<>()`"
+
+
+def _blocked_expansion_default(ref: str) -> str | None:
+    # 기본값은 TMPDIR 이 비었을 때 기록되는 경로라, 허용 루트 밖 /tmp·/var/folders 는 호출자와 무관하게 막는다.
+    match = TMPDIR_DEFAULT_RE.search(ref)
+    if match is None:
+        return None
+    default = match.group(1)
+    for pattern in (TMP_PATH_RE, VAR_FOLDERS_PATH_RE):
+        for found in pattern.finditer(default):
+            if not _token_boundary(default, found.end()):
+                continue
+            path = found.group()
+            if not _is_allowed(path):
+                return path
+    return None
+
+
+def _judge_tmpdir_ref(token: str, tmpdir_allowed: bool) -> str | None:
+    """토큰이 TMPDIR 참조면 기본값·호출자 규칙으로 막을 경로를 돌려준다."""
+    if TMPDIR_REF_RE.fullmatch(token) is None:
+        return None
+    blocked_default = _blocked_expansion_default(token)
+    if blocked_default is not None:
+        return blocked_default
+    if not tmpdir_allowed:
+        return token
+    return None
+
+
+def _quoted_target_tokens(segment: str) -> list[str]:
+    """따옴표로 감싼 리다이렉트·-o·of= 대상. 세그먼트당 패턴마다 한 번만 찾는다."""
+    tokens: list[str] = []
+    for pattern in _QUOTED_TARGET_RES:
+        tokens.extend(pattern.findall(segment))
+    return tokens
+
+
+def _blocked_segment(segment: str, tmpdir_allowed: bool) -> str | None:
+    """HEAD 판정(경로 중복 제거)에 따옴표 대상·매개변수 확장을 더한다."""
+    words = _command_words(segment)
+    for path in dict.fromkeys(TMP_PATH_RE.findall(segment)):
+        if not _is_allowed(path) and _writes_to(segment, path, words):
+            return path
+    for path in dict.fromkeys(VAR_FOLDERS_PATH_RE.findall(segment)):
+        if not _is_allowed(path) and _writes_to(segment, path, words):
+            return path
+    if not tmpdir_allowed:
+        for path in dict.fromkeys(HEAD_TMPDIR_REF_RE.findall(segment)):
+            if _writes_to(segment, path, words):
+                return path
+    quoted = list(dict.fromkeys(_quoted_target_tokens(segment)))
+    quoted_set = set(quoted)
+    for token in quoted:
+        if _is_blocked_temp(token) and not _is_allowed(token):
+            return token
+        judged = _judge_tmpdir_ref(token, tmpdir_allowed)
+        if judged is not None:
+            return judged
+    for ref in dict.fromkeys(TMPDIR_REF_RE.findall(segment)):
+        if ref in quoted_set or not _writes_to(segment, ref, words):
+            continue
+        judged = _judge_tmpdir_ref(ref, tmpdir_allowed)
+        if judged is not None:
+            return judged
+    return None
+
+
 def _blocked_command_path(command: str, environ: Mapping[str, str], caller: str) -> str | None:
-    """셸 쓰기 대상이 scratchpad 밖 임시 경로거나, 이 호출자에게 허용되지 않은 $TMPDIR 이면 그 토큰을 돌려준다."""
+    """HEAD 가 막는 경로이거나, 그 위에 더한 따옴표 대상·매개변수 확장이면 그 토큰을 돌려준다."""
     tmpdir_allowed = tmpdir_write_allowed(caller, environ)
     for segment in SEGMENT_SPLIT_RE.split(_strip_heredoc_bodies(command)):
-        for path in TMP_PATH_RE.findall(segment):
-            if not _is_allowed(path) and _writes_to(segment, path):
-                return path
-        for path in VAR_FOLDERS_PATH_RE.findall(segment):
-            if not _is_allowed(path) and _writes_to(segment, path):
-                return path
-        if tmpdir_allowed:
-            continue
-        for path in TMPDIR_REF_RE.findall(segment):
-            if _writes_to(segment, path):
-                return path
+        blocked = _blocked_segment(segment, tmpdir_allowed)
+        if blocked is not None:
+            return blocked
     return None
 
 

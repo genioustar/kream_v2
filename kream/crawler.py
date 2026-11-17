@@ -12,9 +12,11 @@ import asyncio
 import logging
 import random
 import time
+from datetime import date
 from urllib.parse import parse_qs, urlsplit
 from common.models import KreamProduct
 from common.pacing import CrawlBlockedError, check_response
+from kream.cache import REASON_NO_MATCH, REASON_NO_RESULT, KreamCache
 from kream.parser import (
     KREAM_PRODUCT_CARD_SELECTOR,
     KREAM_SELECTORS,
@@ -212,12 +214,25 @@ def _raise_if_kream_limited(page) -> None:
         raise CrawlBlockedError(f"Kream 문서/API HTTP {status} — 후속 요청 중단")
 
 
-async def _load_detail_model_number(page, product_url: str) -> str | None:
+async def _load_detail_model_number(
+    page,
+    product_url: str,
+    *,
+    cache: KreamCache | None = None,
+) -> str | None:
     """
     Kream 상품 상세 페이지로 이동하여 실제 모델번호를 읽는다.
 
+    캐시에 같은 URL이 있으면 페이지를 열지 않는다.
     모델번호 DOM이 없거나 파싱할 수 없으면 오탐 저장을 막기 위해 None을 반환한다.
+    파싱에 성공한 모델번호만 캐시에 남긴다.
     """
+    if cache is not None:
+        cached_model_number = cache.detail_model(product_url)
+        if cached_model_number is not None:
+            logger.debug("상세 모델번호 캐시 사용: url=%s", product_url)
+            return cached_model_number
+
     _raise_if_kream_limited(page)
     response = None
     try:
@@ -254,6 +269,8 @@ async def _load_detail_model_number(page, product_url: str) -> str | None:
     for text in texts:
         model_number = parse_kream_model_number(text)
         if model_number:
+            if cache is not None:
+                cache.remember_detail_model(product_url, model_number)
             return model_number
 
     logger.warning("Kream 상세 모델번호 파싱 실패: url=%s", product_url)
@@ -264,19 +281,32 @@ async def _find_verified_kream_product(
     model_name: str,
     cards_data: list[dict],
     page,
+    *,
+    cache: KreamCache | None = None,
+    allow_negative: bool = False,
 ) -> KreamProduct | None:
-    """검색 후보 상세를 순서대로 확인해 모델번호가 정확히 맞는 첫 상품을 반환한다."""
+    """검색 후보 상세를 순서대로 확인해 모델번호가 정확히 맞는 첫 상품을 반환한다.
+
+    allow_negative 가 True 이고 상위 후보 전부의 모델번호를 확인했고 하나도 맞지 않을 때만
+    no_match 를 기록한다. 검색은 렌더링 조건이 충족됐을 때만 True 를 넘긴다.
+    상세 확인 실패·필드 누락·예외가 하나라도 있으면 기록하지 않는다.
+    """
+    every_candidate_confirmed = True
     for card in cards_data[:MAX_RESULTS]:
         try:
             if not card["name"] or not card["priceStr"] or not card["href"]:
                 logger.debug("[%s] 상품명/가격/URL 없음 — 건너뜀", model_name)
+                every_candidate_confirmed = False
                 continue
 
-            actual_model_number = await _load_detail_model_number(page, card["href"])
+            actual_model_number = await _load_detail_model_number(
+                page, card["href"], cache=cache
+            )
             if actual_model_number is None:
                 logger.warning(
                     "[%s] 실제 모델번호를 확인할 수 없음 — url=%s 건너뜀", model_name, card['href']
                 )
+                every_candidate_confirmed = False
                 continue
 
             if not model_numbers_match(model_name, actual_model_number):
@@ -298,6 +328,8 @@ async def _find_verified_kream_product(
                 trade_count=trade_count,
                 kream_url=card["href"],
             )
+            if cache is not None:
+                cache.drop_negative(model_name)
             logger.info(
                 "[%s] 모델번호 검증 완료: actual=%r, %r, 가격=%s원, 거래량=%s", model_name, actual_model_number, card['name'], format(kream_price, ","), trade_count
             )
@@ -307,10 +339,13 @@ async def _find_verified_kream_product(
             raise
         except Exception as exc:
             logger.warning("[%s] 후보 검증 실패: %s — 건너뜀", model_name, exc)
+            every_candidate_confirmed = False
 
     logger.info(
         "[%s] 상위 %s개 후보 중 실제 모델번호가 일치하는 상품 없음", model_name, min(len(cards_data), MAX_RESULTS)
     )
+    if cache is not None and allow_negative and every_candidate_confirmed:
+        cache.remember_negative(model_name, REASON_NO_MATCH, date.today())
     return None
 
 
@@ -454,7 +489,12 @@ async def _wait_for_search_render(
         await _poll_sleep(min(RENDER_POLL_INTERVAL_SEC, remaining))
 
 
-async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None:
+async def _search_kream_once(
+    model_name: str,
+    page,
+    *,
+    cache: KreamCache | None = None,
+) -> list[KreamProduct] | None:
     """
     재사용 페이지로 Kream을 단 1회 검색한다.
     검색창을 클릭하고 키보드로 타이핑한 뒤 Enter를 눌러 사람처럼 검색한다.
@@ -540,9 +580,14 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     # 검색 결과 없음 감지.
     # 연속 결과 없음이면 렌더 조건이 잔존 문구를 바로 믿지 않고, 최소 대기 뒤 7초 상한이 지난 다음에 이 문구를 본다.
     # 그 시점은 기존 4~7초 고정 대기보다 늦으므로 더 보수적이다.
+    # no_result 부정 캐시는 이 문구 분기에서만, 그리고 렌더링 조건이 충족됐을 때만 기록한다.
+    # 조건이 안 맞으면 직전 화면의 문구일 수 있다. 주소 keyword가 이번 모델과 같아도 기록하지 않는다.
+    # 추천 카드가 있어도 카드 수로 판단하지 않는다.
     no_result = await page.locator(_NO_RESULT_TEXT_SELECTOR).count()
     if no_result > 0:
         logger.info("[%s] 검색 결과 없음", model_name)
+        if cache is not None and rendered:
+            cache.remember_negative(model_name, REASON_NO_RESULT, date.today())
         return []
 
     # 검색 결과 카드 대기
@@ -591,7 +636,9 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         logger.warning("[%s] 처리할 카드 없음", model_name)
         return []
 
-    product = await _find_verified_kream_product(model_name, cards_data, page)
+    product = await _find_verified_kream_product(
+        model_name, cards_data, page, cache=cache, allow_negative=rendered
+    )
     return [product] if product is not None else []
 
 
@@ -599,19 +646,29 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
 # 공개 API (순차 검색·중단)
 # ---------------------------------------------------------------------------
 
-async def search_kream(model_name: str, page) -> list[KreamProduct]:
+async def search_kream(
+    model_name: str,
+    page,
+    *,
+    cache: KreamCache | None = None,
+) -> list[KreamProduct]:
     """추가 휴식 없이 한 번만 시도한다. 비정상 결과는 후속 요청을 중단한다."""
     _raise_if_kream_limited(page)
-    result = await _search_kream_once(model_name, page)
+    result = await _search_kream_once(model_name, page, cache=cache)
     if result is None:
         raise CrawlBlockedError(f"[{model_name}] 차단 또는 검색 입력 실패 — 자동 재시도 없이 중단")
     return result
 
 
-async def iter_kream_results(model_names: list[str], context):
+async def iter_kream_results(
+    model_names: list[str],
+    context,
+    *,
+    cache: KreamCache | None = None,
+):
     """탭 하나를 재사용해 추가 휴식 없이 순차 검색한다."""
     if not model_names:
         return
     page = await init_kream_page(context)
     for model_name in model_names:
-        yield model_name, await search_kream(model_name, page)
+        yield model_name, await search_kream(model_name, page, cache=cache)

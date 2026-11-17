@@ -39,12 +39,15 @@ main.py --mode full (기본)
   │     │     │     오늘자 *_products.json 전체에서 고유 model_name 추출
   │     │     └── 그 외 날짜 (kream 모드 포함)
   │     │           diff 생성 후 모든 *_diff.json 의 added/modified 에서 model_name 추출
+  │     ├── output/kream_cache 의 유효한 검색 부정 캐시(7일)를 제외. 전부 빠지면 브라우저를 열지 않음
   │     ├── 200개 초과 시 200개씩 청크 분할 (추가 휴식 없음)
   │     └── 각 청크마다:
   │           1. kream/crawler.py 로 Kream 검색 후 상세 모델번호 완전 일치 검증
-  │              (단일 탭 재사용, 검색별 상위 5개 후보)
+  │              (단일 탭 재사용, 검색별 상위 5개 후보, 상세 모델번호 캐시 적중 시 페이지 이동 없음)
   │           2. kream/comparator.py 로 모델번호 재검증 + 차익 비교 (누적)
   │           3. output/YYYYMMDD/arbitrage_results.json 즉시 저장
+  │           4. output/kream_cache 저장. 일부 결과 뒤 중단이면 차익 저장과 같은 시점.
+  │              결과가 없이 바로 중단이면 차익 파일 전에 캐시만 저장하고 다시 올린다. 저장 실패는 경고 후 계속
   │
   └── STEP 4: diff_output.py (전체 크롤 날짜에만 실행)
         오늘자 *_products.json 전체 diff → output/diff/YYYYMMDD_vs_YYYYMMDD/
@@ -106,6 +109,7 @@ resell-sniper/
 ├── kream/                # Kream 크롤러 + 가격 비교
 │   ├── __init__.py
 │   ├── crawler.py        # init_kream_page(), search_kream()
+│   ├── cache.py          # 상세 모델번호·검색 부정 캐시 로드·조회·기록·저장
 │   ├── parser.py         # Kream 셀렉터, 가격·거래량·상세 모델번호 파싱/비교
 │   ├── comparator.py     # find_arbitrage()
 │   └── history_marker.py # 직전 날짜 결과와 비교해 저장 이력·가격 변동 표시
@@ -122,6 +126,9 @@ resell-sniper/
 │   │   ├── diagnostics/  # naver_<run_id>_<site>.json
 │   │   ├── checkpoints/naver/ # 설정 해시별 완료 결과
 │   │   └── validation/   # 독립 DOM/JSON 검증 산출물
+│   ├── kream_cache/      # 날짜와 무관한 Kream 캐시. 비우려면 이 디렉터리를 삭제한다
+│   │   ├── detail_model_numbers.json
+│   │   └── search_negative.json
 │   ├── diff/
 │   │   └── YYYYMMDD_vs_YYYYMMDD/
 │   │       ├── marketplace_products_diff.json
@@ -144,6 +151,7 @@ resell-sniper/
 │   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
+│   ├── test_kream_cache.py       # Kream 상세 모델번호·검색 부정 캐시 로드·TTL·기록 조건·검색 목록 제외
 │   ├── test_kream_search_flow.py # Kream 검색 입력 즉시 판정·버튼 셀렉터·렌더링 조건 대기
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_main_site_registry.py # STEP 1 등록 표·--site 파싱·재수집·네이버 빈 결과 유지·full은 재수집 안 함·종료 코드·__main__ 제거
@@ -333,8 +341,8 @@ resell-sniper/
 
 ### kream/crawler.py
 - `init_kream_page(context)` — 기존 Chrome 세션에 새 탭 생성 후 메인 페이지 1회 방문
-- `search_kream(model_name, page)` — 추가 휴식 없이 한 번만 시도한다. 차단/입력 실패/카드 대기 타임아웃은 후속 요청을 중단한다.
-- `iter_kream_results(model_names, context)` — 탭 하나를 생성해 모든 모델 검색에 재사용한다. 추가 정기 휴식 없이 완료한 `(모델명, 결과)`를 순차 반환한다.
+- `search_kream(model_name, page, *, cache=None)` — 추가 휴식 없이 한 번만 시도한다. 차단/입력 실패/카드 대기 타임아웃은 후속 요청을 중단한다. 캐시를 이번 검색에 넘긴다.
+- `iter_kream_results(model_names, context, *, cache=None)` — 탭 하나를 생성해 모든 모델 검색에 재사용한다. 추가 정기 휴식 없이 완료한 `(모델명, 결과)`를 순차 반환한다. `main`이 넘긴 캐시를 그대로 전달한다.
 - `_record_kream_response(page, response)` / `_raise_if_kream_limited(page)` — Kream 도메인의 문서·XHR·fetch HTTP 403/429를 기억해 후속 검색·상세 요청 전에 중단한다. 타사 리소스 오류는 제외한다.
 - `_open_search_and_get_input(page)` — 입력창이 이미 보이면 버튼 없이 반환한다. 이 확인은 `SEARCH_INPUT_ALREADY_VISIBLE_TIMEOUT_MS=0`으로 셀렉터마다 즉시 1회다. 없으면 `SEARCH_BUTTON_SELECTORS`(첫 항목 `button.btn_search`, 다음 `button.header-search-button`)를 `SEARCH_BUTTON_VISIBLE_TIMEOUT_MS`(2초) 동안 확인해 클릭하고, `SEARCH_INPUT_AFTER_CLICK_TIMEOUT_MS`(3초) 동안 입력창을 찾는다.
 - `_search_keyword(url)` — `keyword` 쿼리를 `urllib.parse.parse_qs`로 디코딩한다. `+`와 `%20`은 공백이다.
@@ -342,11 +350,21 @@ resell-sniper/
 - `_location_href(page)` — `page.evaluate("location.href")`. `page.url`은 명령(goto/click/fill/press) 응답 시점에만 갱신되는 캐시라 SPA 안에서 바뀐 주소를 반영하지 못한다.
 - `_search_results_rendered(page, model_name, previous_hrefs, previous_no_result)` — 실제 주소의 keyword가 이번 `model_name`과 같고, (`검색 결과가 없습니다`가 있으면서 직전에는 없었거나) 카드 href가 Enter 직전 스냅샷과 다르면 True. 현재 카드가 없으면 로딩 중으로 보고 충족하지 않는다. title은 조건에 넣지 않는다. 카드 목록이 스냅샷과 같거나 직전 결과 없음 문구가 남아 있으면 상한까지 기다린 뒤 기존 흐름으로 간다.
 - `_wait_for_search_render(page, model_name, previous_hrefs, previous_no_result)` — Enter 뒤 `_human_wait(RENDER_MIN_WAIT_MIN_SEC, RENDER_MIN_WAIT_MAX_SEC)`=(1.5, 2.5)로 사람처럼 보이는 간격을 둔 다음, `RENDER_MAX_WAIT_SEC`(7초) 안에서 `RENDER_POLL_INTERVAL_SEC`(0.2초)마다 `_search_results_rendered`를 본다. 시각과 간격은 `_monotonic`·`_poll_sleep`이다. 맞으면 True, 상한이면 False.
-- `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → 카드 href와 결과 없음 문구 스냅샷 → Enter → `_wait_for_search_render` → 차단 페이지 감지 → 결과 없음 감지 → 카드 셀렉터 대기(`SELECTOR_TIMEOUT`) → 결과 파싱. 렌더링 조건이 상한까지 안 맞아도 차단·결과 없음·카드 대기는 그대로다. 연속 결과 없음의 문구 판정은 최소 대기 뒤 7초 상한 다음이라 기존 4~7초 고정 대기보다 늦다. DEBUG 로그 `렌더링 대기 완료`에 판정에 쓴 keyword, 스냅샷 카드 수, 현재 카드 수, `previous_no_result`, 조건 충족 여부를 남긴다. 카드 대기 시각도 `_monotonic`이다.
-- `_load_detail_model_number(page, product_url)` — Playwright 세션으로 후보 상세 URL을 열고, 반응형 중복 요소 중 첫 hidden 노드에 막히지 않도록 `attached` DOM 텍스트에서 `모델번호`를 읽는다. 없으면 `None`을 반환해 fail-closed 처리
-- `_find_verified_kream_product(model_name, cards_data, page)` — 검색 결과 상위 `MAX_RESULTS=5`개 상세를 순서대로 확인하고 실제 모델번호가 검색어와 완전 일치하는 첫 상품만 반환
+- `_search_kream_once(model_name, page, *, cache=None)` — 검색 입력 → 타이핑 → 카드 href와 결과 없음 문구 스냅샷 → Enter → `_wait_for_search_render` → 차단 페이지 감지 → 결과 없음 감지 → 카드 셀렉터 대기(`SELECTOR_TIMEOUT`) → 결과 파싱. 렌더링 조건이 상한까지 안 맞아도 차단·결과 없음·카드 대기는 그대로다. 연속 결과 없음의 문구 판정은 최소 대기 뒤 7초 상한 다음이라 기존 4~7초 고정 대기보다 늦다. DEBUG 로그 `렌더링 대기 완료`에 판정에 쓴 keyword, 스냅샷 카드 수, 현재 카드 수, `previous_no_result`, 조건 충족 여부를 남긴다. 카드 대기 시각도 `_monotonic`이다. 반환은 `list[KreamProduct]` 또는 중단용 `None`이다. `검색 결과가 없습니다` 문구 분기에서만, 렌더링 조건이 충족됐을 때만 부정 캐시 `no_result`를 기록한다. 조건이 안 맞으면 주소 keyword가 이번 모델과 같아도 기록하지 않는다. 결과 없음 페이지의 추천 카드 수로 기록하지 않는다. 카드 0개 경고·카드 셀렉터 타임아웃·차단·`None`은 기록하지 않는다. 카드 검증에는 `allow_negative=rendered`를 넘긴다.
+- `_load_detail_model_number(page, product_url, *, cache=None)` — 캐시에 같은 URL이 있으면 `page.goto` 없이 모델번호를 반환하고 DEBUG `상세 모델번호 캐시 사용`을 남긴다. 없으면 Playwright 세션으로 후보 상세 URL을 열고, 반응형 중복 요소 중 첫 hidden 노드에 막히지 않도록 `attached` DOM 텍스트에서 `모델번호`를 읽는다. 파싱에 성공한 때만 캐시에 넣는다. 없거나 실패하면 `None`을 반환해 fail-closed 처리하고 캐시에 넣지 않는다.
+- `_find_verified_kream_product(model_name, cards_data, page, *, cache=None, allow_negative=False)` — 검색 결과 상위 `MAX_RESULTS=5`개 상세를 순서대로 확인하고 실제 모델번호가 검색어와 완전 일치하는 첫 상품만 반환한다. 일치하면 그 모델명의 부정 캐시를 지운다. `allow_negative`가 True이고 상위 후보 전부의 모델번호를 확인했고 하나도 맞지 않으면 `no_match`를 기록한다. 기본값은 False다. 상세 확인 실패·필드 누락·예외가 하나라도 있으면 기록하지 않는다. `CrawlBlockedError`는 그대로 올린다.
 - 검색 결과 수로 정확도를 추정하지 않는다. 상세 모델번호 검증을 통과하지 못한 후보는 KreamProduct와 차익 결과에 저장하지 않는다.
 - 상세 이동 전 추가 휴식과 자동 재시도 없음. 차단은 HTTP 403/429와 차단 문구로만 판단한다. 본문을 읽지 못하거나 짧은 화면은 그 상품의 모델번호 확인으로 넘긴다.
+
+### kream/cache.py
+- `KREAM_CACHE_DIR_NAME` — `kream_cache`. 캐시 디렉터리는 `output/kream_cache/`다. 날짜 폴더 밖에 둔다.
+- `NEGATIVE_CACHE_TTL_DAYS` — 7. 새로 등록된 상품을 놓치는 최대 기간이다. `checked_at`부터 오늘까지 일수가 0 이상 7 미만이면 유효하다. 미래 날짜(음수 일수)와 7일 이상은 만료다.
+- `DETAIL_CACHE_FILENAME` / `NEGATIVE_CACHE_FILENAME` — `detail_model_numbers.json` `{상품 URL: 모델번호}`, `search_negative.json` `{모델명: {"checked_at": "YYYY-MM-DD", "reason": "no_result" | "no_match"}}`.
+- `detail_cache_key(product_url)` — 캐시 키. `card.href` 실측(`logs/crawler_20261116.log` 2195건)은 `https://kream.co.kr/products/{id}`뿐이라 쿼리·끝 슬래시를 자르지 않는다.
+- `KreamCache(directory)` — `load()`는 파일이 없으면 빈 캐시, JSON이 깨졌거나 형식이 다르면 경고 후 그 파일만 빈 캐시로 시작한다. `detail_model` / `remember_detail_model` / `remember_negative` / `drop_negative` / `negative_is_fresh(model_name, today)`. `save()`는 디렉터리를 만든 뒤 두 파일을 `write_json_atomic`으로 쓴다. 저장 실패는 호출한 `main._save_kream_cache`가 경고만 남기고 파이프라인을 계속한다.
+- `exclude_fresh_negative(model_names, cache, today)` — 유효한 부정 캐시 모델명을 검색 목록에서 뺀다. `main`이 그 결과를 청크 분할 전에 검색 대상으로 쓰고 `부정 캐시로 N개 제외 (유효기간 7일)`을 남긴다. 남은 목록이 비면 기존 `검색할 모델 없음` 경로로 브라우저를 열지 않는다.
+- 캐시를 끄는 실행 옵션은 없다. 비우려면 `output/kream_cache/`를 삭제한다. 모델번호 파싱·비교 규칙을 바꾸면 `output/kream_cache/`를 삭제한다.
+- 같은 캐시 디렉터리를 두 실행이 동시에 저장하면 나중 저장이 파일을 덮어쓴다. 파일은 깨지지 않고, 기록은 덜 쌓인 쪽이 된다.
 
 ### kream/parser.py
 - `KREAM_PRODUCT_CARD_SELECTOR` — 검색 카드 `<a>` 셀렉터. `KREAM_SELECTORS["search_results"]`, Enter 직전 href 스냅샷, 카드 추출이 같은 문자열을 쓴다.

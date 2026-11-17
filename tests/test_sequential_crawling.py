@@ -171,9 +171,11 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
         page.locator.return_value.count = AsyncMock(return_value=0)
         page.wait_for_selector = AsyncMock(side_effect=TimeoutError("cards missing"))
         search_input = MagicMock(click=AsyncMock())
+        # 렌더링 대기를 패치하지 않으면 조건이 안 맞아 상한까지 실제 sleep 한다.
         with patch("kream.crawler._open_search_and_get_input", new=AsyncMock(return_value=search_input)), \
              patch("kream.crawler._human_wait", new=AsyncMock()), \
              patch("kream.crawler._human_type", new=AsyncMock()), \
+             patch("kream.crawler._wait_for_search_render", new=AsyncMock(return_value=False)), \
              patch("kream.crawler._is_blocked_page", new=AsyncMock(return_value=False)):
             self.assertIsNone(await _search_kream_once("A", page))
 

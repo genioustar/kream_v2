@@ -144,6 +144,7 @@ resell-sniper/
 │   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
+│   ├── test_kream_search_flow.py # Kream 검색 입력 즉시 판정·버튼 셀렉터·렌더링 조건 대기
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_main_site_registry.py # STEP 1 등록 표·--site 파싱·재수집·네이버 빈 결과 유지·full은 재수집 안 함·종료 코드·__main__ 제거
 │   ├── test_model_names.py       # 모델명 규칙·크롤러 변환 회귀 테스트
@@ -335,14 +336,20 @@ resell-sniper/
 - `search_kream(model_name, page)` — 추가 휴식 없이 한 번만 시도한다. 차단/입력 실패/카드 대기 타임아웃은 후속 요청을 중단한다.
 - `iter_kream_results(model_names, context)` — 탭 하나를 생성해 모든 모델 검색에 재사용한다. 추가 정기 휴식 없이 완료한 `(모델명, 결과)`를 순차 반환한다.
 - `_record_kream_response(page, response)` / `_raise_if_kream_limited(page)` — Kream 도메인의 문서·XHR·fetch HTTP 403/429를 기억해 후속 검색·상세 요청 전에 중단한다. 타사 리소스 오류는 제외한다.
-- `_open_search_and_get_input(page)` — 입력창이 이미 보이면 바로 반환(검색 결과 페이지), 없으면 헤더 검색 버튼 클릭 후 반환
-- `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → Enter → 결과 파싱
+- `_open_search_and_get_input(page)` — 입력창이 이미 보이면 버튼 없이 반환한다. 이 확인은 `SEARCH_INPUT_ALREADY_VISIBLE_TIMEOUT_MS=0`으로 셀렉터마다 즉시 1회다. 없으면 `SEARCH_BUTTON_SELECTORS`(첫 항목 `button.btn_search`, 다음 `button.header-search-button`)를 `SEARCH_BUTTON_VISIBLE_TIMEOUT_MS`(2초) 동안 확인해 클릭하고, `SEARCH_INPUT_AFTER_CLICK_TIMEOUT_MS`(3초) 동안 입력창을 찾는다.
+- `_search_keyword(url)` — `keyword` 쿼리를 `urllib.parse.parse_qs`로 디코딩한다. `+`와 `%20`은 공백이다.
+- `_product_card_hrefs(page)` — `KREAM_PRODUCT_CARD_SELECTOR`로 현재 카드 href 목록을 읽는다. Enter 직전에 스냅샷하고, 렌더링 판정에서 다시 읽는다.
+- `_location_href(page)` — `page.evaluate("location.href")`. `page.url`은 명령(goto/click/fill/press) 응답 시점에만 갱신되는 캐시라 SPA 안에서 바뀐 주소를 반영하지 못한다.
+- `_search_results_rendered(page, model_name, previous_hrefs, previous_no_result)` — 실제 주소의 keyword가 이번 `model_name`과 같고, (`검색 결과가 없습니다`가 있으면서 직전에는 없었거나) 카드 href가 Enter 직전 스냅샷과 다르면 True. 현재 카드가 없으면 로딩 중으로 보고 충족하지 않는다. title은 조건에 넣지 않는다. 카드 목록이 스냅샷과 같거나 직전 결과 없음 문구가 남아 있으면 상한까지 기다린 뒤 기존 흐름으로 간다.
+- `_wait_for_search_render(page, model_name, previous_hrefs, previous_no_result)` — Enter 뒤 `_human_wait(RENDER_MIN_WAIT_MIN_SEC, RENDER_MIN_WAIT_MAX_SEC)`=(1.5, 2.5)로 사람처럼 보이는 간격을 둔 다음, `RENDER_MAX_WAIT_SEC`(7초) 안에서 `RENDER_POLL_INTERVAL_SEC`(0.2초)마다 `_search_results_rendered`를 본다. 시각과 간격은 `_monotonic`·`_poll_sleep`이다. 맞으면 True, 상한이면 False.
+- `_search_kream_once(model_name, page)` — 검색 입력 → 타이핑 → 카드 href와 결과 없음 문구 스냅샷 → Enter → `_wait_for_search_render` → 차단 페이지 감지 → 결과 없음 감지 → 카드 셀렉터 대기(`SELECTOR_TIMEOUT`) → 결과 파싱. 렌더링 조건이 상한까지 안 맞아도 차단·결과 없음·카드 대기는 그대로다. 연속 결과 없음의 문구 판정은 최소 대기 뒤 7초 상한 다음이라 기존 4~7초 고정 대기보다 늦다. DEBUG 로그 `렌더링 대기 완료`에 판정에 쓴 keyword, 스냅샷 카드 수, 현재 카드 수, `previous_no_result`, 조건 충족 여부를 남긴다. 카드 대기 시각도 `_monotonic`이다.
 - `_load_detail_model_number(page, product_url)` — Playwright 세션으로 후보 상세 URL을 열고, 반응형 중복 요소 중 첫 hidden 노드에 막히지 않도록 `attached` DOM 텍스트에서 `모델번호`를 읽는다. 없으면 `None`을 반환해 fail-closed 처리
 - `_find_verified_kream_product(model_name, cards_data, page)` — 검색 결과 상위 `MAX_RESULTS=5`개 상세를 순서대로 확인하고 실제 모델번호가 검색어와 완전 일치하는 첫 상품만 반환
 - 검색 결과 수로 정확도를 추정하지 않는다. 상세 모델번호 검증을 통과하지 못한 후보는 KreamProduct와 차익 결과에 저장하지 않는다.
 - 상세 이동 전 추가 휴식과 자동 재시도 없음. 차단은 HTTP 403/429와 차단 문구로만 판단한다. 본문을 읽지 못하거나 짧은 화면은 그 상품의 모델번호 확인으로 넘긴다.
 
 ### kream/parser.py
+- `KREAM_PRODUCT_CARD_SELECTOR` — 검색 카드 `<a>` 셀렉터. `KREAM_SELECTORS["search_results"]`, Enter 직전 href 스냅샷, 카드 추출이 같은 문자열을 쓴다.
 - `KREAM_SELECTORS` — 검색 카드와 상세 `모델번호` 문단 셀렉터
 - `parse_kream_model_number(text)` — `모델번호 {값}` 문단에서 실제 모델번호 추출
 - `normalize_model_number(model_number)` — NFKC·대소문자·공백/구분자 표기를 비교용으로 정규화

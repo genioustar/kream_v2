@@ -25,9 +25,12 @@ import unicodedata
 #   - 거래량             : .detail_wrap .trade_count
 #   - 즉시구매가(재확인) : .buy_now_price .amount
 
+# 검색 카드 <a>. 스냅샷·카드 추출·search_results 가 같은 문자열을 쓴다.
+KREAM_PRODUCT_CARD_SELECTOR = 'a.product_card[href*="/products/"]'
+
 KREAM_SELECTORS: dict[str, str] = {
     # 검색 결과 페이지: 카드 자체가 <a> 태그
-    "search_results": "a.product_card[href*='/products/']",
+    "search_results": KREAM_PRODUCT_CARD_SELECTOR,
     # 상세 페이지: "모델번호 {값}" 형식의 문단 (반응형 DOM 중복 가능)
     "detail_model_number": "p:has-text('모델번호')",
 }

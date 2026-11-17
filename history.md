@@ -1,5 +1,14 @@
 # 변경 히스토리
 
+## 2026-11-17 — Kream 검색의 셀렉터 폴링과 고정 렌더 대기를 줄임
+
+- [Kream] 2026-11-16 로그, 검색 2721회, Kream 단계 13.9시간. "검색 시작 → 검색 버튼 클릭 완료" 평균 8.4초(2004회, 전체 34%). ego `is_visible(timeout)`이 timeout 동안 폴링하는데, 상세 페이지에는 입력창이 없어 셀렉터 4개 × 1초를 기다리고, `SEARCH_BUTTON_SELECTORS`의 긴 `#wrap` 경로가 2초를 기다렸다. 그 경로는 2004회 중 0회 일치했고 클릭은 전부 `button.btn_search`, 입력창은 전부 `input.input_search`였다. "Enter → 렌더링 대기 완료" 평균 5.5초(전체 30%)는 고정 `_human_wait(4.0, 7.0)`이다.
+- [Kream] 긴 `#wrap` 버튼 경로를 없애고 `button.btn_search`를 맨 앞에 둔다. 입력창이 이미 보이는지 확인은 `SEARCH_INPUT_ALREADY_VISIBLE_TIMEOUT_MS=0`으로 셀렉터마다 즉시 1회다. 버튼 가시성(2초)과 클릭 후 입력창(3초)은 `SEARCH_BUTTON_VISIBLE_TIMEOUT_MS`, `SEARCH_INPUT_AFTER_CLICK_TIMEOUT_MS`다.
+  - SUPERSEDED: 검색 버튼은 긴 CSS 경로를 먼저 시도하고 실패하면 class 폴백 — 긴 경로는 실측 0회 일치였고 매번 2초를 썼다.
+- [Kream] Enter 직전 카드 href를 `KREAM_PRODUCT_CARD_SELECTOR`로 스냅샷하고, 같은 문구 셀렉터로 결과 없음 여부(`previous_no_result`)도 스냅샷한다. 그다음 `_human_wait(1.5, 2.5)`로 사람처럼 보이는 간격을 유지하고, `RENDER_MAX_WAIT_SEC`(7초) 안에서 0.2초마다 폴링한다. 조건은 `page.evaluate("location.href")`의 keyword를 `urllib.parse.parse_qs`로 디코딩한 값이 이번 `model_name`과 같고, (`검색 결과가 없습니다`가 있으면서 직전에는 없었거나) 카드 href가 스냅샷과 다른 것이다. 현재 카드가 0개면 로딩 중으로 보고 충족하지 않는다. `+`와 `%20`은 공백이다. `page.url`은 명령(goto/click/fill/press) 응답 시점에만 갱신되는 캐시라 SPA 안에서 바뀐 주소를 반영하지 못한다. 카드가 스냅샷과 같거나 직전 결과 없음 문구가 남아 있으면 상한 뒤 기존 차단·결과 없음·카드 `SELECTOR_TIMEOUT` 흐름으로 간다. 그 경우는 정확성이 기존과 같고 느릴 뿐이다. 연속 결과 없음의 문구 판정은 최소 대기 뒤 7초 상한 다음이라 기존 4~7초 고정 대기보다 보수적이다. 로그 `렌더링 대기 완료`는 keyword, 스냅샷 카드 수, 현재 카드 수, `previous_no_result`, 조건 충족 여부를 DEBUG로 남긴다. title은 조건에서 뺐다. title까지 요구하면 title이 늦게 바뀔 때 이미 맞는 주소·카드도 상한까지 기다린다.
+- [Kream] 예상 절감은 추정이다. 상세 페이지 클릭 전 대기는 입력창 약 4초와 긴 경로 2초가 빠져, 2004회 기준 약 3시간이다. 렌더 대기는 결과가 빨리 보이면 1.5~2.5초 근처로 줄고, 안 보이면 최소 대기 뒤에 폴링 상한 7초를 더 쓴 뒤 기존 흐름으로 간다. 그 최악은 기존 고정 상한 7초보다 길다.
+- [테스트] `tests/test_kream_search_flow.py`. 카드가 없어 실패로 보던 기존 검색 테스트는 렌더링 대기를 패치해 상한 sleep을 타지 않는다.
+
 ## 2026-11-16 — 임시 경로 훅은 HEAD 판정 위에만 덧붙인다
 
 - [하네스] `_writes_to`는 HEAD와 같다. `>`·`-o`·`of=`·`open`·`tee`/`cp`가 경로를 보면 따옴표 안이어도 막는다. 최종 판정은 그 결과이거나, 리다이렉트·`-o`/`--output`·`of=`의 대상이 따옴표로 감싸진 경우, 또는 `${TMPDIR:-…}` `${TMPDIR:=…}` `${TMPDIR-…}` `${TMPDIR=…}` `${TMPDIR:+…}` `${TMPDIR+…}` `${TMPDIR:?…}` `${TMPDIR?…}` 이다. 기본값에 허용 루트 밖 임시 경로가 있으면 호출자와 무관하게 막고, 아니면 `$TMPDIR`과 같은 호출자 규칙이다. 경로 후보는 세그먼트마다 `dict.fromkeys`로 한 번만 본다. 2026-11-12에 별도 작업으로 남긴 따옴표 우회와 `${TMPDIR:-...}` 류는 여기서 막는다. HEAD가 막는지는 `tests/fixtures/block_tmp_writes_head.py`(577f2f9 고정 복사)로만 검사한다.

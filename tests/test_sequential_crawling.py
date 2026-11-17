@@ -16,7 +16,7 @@ from naver.crawler import crawl_marketplace
 
 class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
     async def test_partial_kream_results_are_saved_before_stopping(self):
-        async def results(*args):
+        async def results(*args, **kwargs):
             yield "A", []
             raise CrawlBlockedError("blocked")
         manager = MagicMock()
@@ -28,12 +28,14 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
              patch("main.discover_dates", return_value=[]), \
              patch("main.create_browser", return_value=manager), \
              patch("main.iter_kream_results", results), \
-             patch("main.find_arbitrage", return_value=[]) as compare:
+             patch("main.find_arbitrage", return_value=[]) as compare, \
+             patch("main._save_kream_cache", wraps=pipeline._save_kream_cache) as save_cache:
             with self.assertRaises(CrawlBlockedError):
                 await pipeline.main("kream")
             output = Path(directory) / date.today().strftime("%Y%m%d") / "arbitrage_results.json"
             self.assertEqual(output.read_text(), "[]")
             self.assertEqual(compare.call_args.args[1], {"A": []})
+            save_cache.assert_called()
 
     async def test_connection_failure_preserves_previous_output(self):
         manager = MagicMock()
@@ -43,13 +45,15 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
              patch.object(config, "OUTPUT_DIR", directory), \
              patch("main._load_all_products", return_value=[MagicMock(model_name="A")]), \
              patch("main.discover_dates", return_value=[]), \
-             patch("main.create_browser", return_value=manager):
+             patch("main.create_browser", return_value=manager), \
+             patch("main._save_kream_cache", wraps=pipeline._save_kream_cache) as save_cache:
             output = Path(directory) / date.today().strftime("%Y%m%d") / "arbitrage_results.json"
             output.parent.mkdir()
             output.write_text('[{"previous": true}]')
             with self.assertRaisesRegex(RuntimeError, "connection failed"):
                 await pipeline.main("kream")
             self.assertEqual(output.read_text(), '[{"previous": true}]')
+            save_cache.assert_called()
 
     async def test_no_changed_models_does_not_open_browser(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -133,7 +137,7 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_has_no_added_rest(self):
         events = []
         async def rest(*args): events.append("pause")
-        async def request(*args):
+        async def request(*args, **kwargs):
             events.append("search")
             return []
         with patch("kream.crawler.asyncio.sleep", side_effect=rest), \

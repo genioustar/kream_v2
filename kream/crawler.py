@@ -12,10 +12,11 @@ import asyncio
 import logging
 import random
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from common.models import KreamProduct
 from common.pacing import CrawlBlockedError, check_response
 from kream.parser import (
+    KREAM_PRODUCT_CARD_SELECTOR,
     KREAM_SELECTORS,
     model_numbers_match,
     parse_kream_model_number,
@@ -42,19 +43,41 @@ SEARCH_INPUT_SELECTORS = [
     "input[placeholder*='검색']",
 ]
 
-# 검색 버튼 폴백 셀렉터 순서
-# 홈: #wrap > ... > button (정확한 경로)
-# 공통: class 기반 (검색결과 페이지에서도 동작)
+# 검색 버튼 폴백 셀렉터 순서. 실측 클릭은 전부 button.btn_search 였다.
 SEARCH_BUTTON_SELECTORS = [
-    "#wrap > div.header-wrapper > div > div > div > div > div > div > div.header_main > div > div.right > div > button",
     "button.btn_search",
     "button.header-search-button",
 ]
+
+# ego Locator.is_visible(timeout)은 timeout(ms) 동안 실제로 폴링한다.
+# 입력창이 이미 보이는지 보는 확인은 기다리지 않고 셀렉터마다 즉시 1회만 판정한다.
+SEARCH_INPUT_ALREADY_VISIBLE_TIMEOUT_MS = 0
+# 버튼이 보이는지, 클릭 뒤 오버레이 입력창이 열리는지는 기다린다.
+SEARCH_BUTTON_VISIBLE_TIMEOUT_MS = 2_000
+SEARCH_INPUT_AFTER_CLICK_TIMEOUT_MS = 3_000
+
+# Enter 뒤 사람처럼 보이는 간격을 유지하는 최소 대기(초).
+RENDER_MIN_WAIT_MIN_SEC = 1.5
+RENDER_MIN_WAIT_MAX_SEC = 2.5
+# 최소 대기 다음, 이번 검색 결과가 렌더링됐는지 폴링하는 상한(초).
+# 기존 고정 대기 상한(7초)과 비슷하다.
+RENDER_MAX_WAIT_SEC = 7.0
+RENDER_POLL_INTERVAL_SEC = 0.2
 
 
 # ---------------------------------------------------------------------------
 # 사람처럼 행동하는 헬퍼
 # ---------------------------------------------------------------------------
+
+def _monotonic() -> float:
+    """렌더링 폴링 시각. 테스트는 이 이름만 갈아끼운다."""
+    return time.monotonic()
+
+
+async def _poll_sleep(seconds: float) -> None:
+    """렌더링 폴링 간격. 테스트는 이 이름만 갈아끼운다."""
+    await asyncio.sleep(seconds)
+
 
 async def _human_wait(min_s: float = 1.0, max_s: float = 3.0) -> None:
     """랜덤 대기로 사람처럼 행동한다."""
@@ -80,7 +103,7 @@ async def _click_search_button(page) -> bool:
     for selector in SEARCH_BUTTON_SELECTORS:
         try:
             btn = page.locator(selector).first
-            if not await btn.is_visible(timeout=2000):
+            if not await btn.is_visible(timeout=SEARCH_BUTTON_VISIBLE_TIMEOUT_MS):
                 continue
             await _human_wait(0.3, 0.7)
             await btn.click()
@@ -91,10 +114,13 @@ async def _click_search_button(page) -> bool:
     return False
 
 
-async def _find_visible_input(page, timeout_ms: int = 2000):
+async def _find_visible_input(page, timeout_ms: int):
     """
     SEARCH_INPUT_SELECTORS 순서로 보이는 입력창을 찾아 반환한다.
     찾지 못하면 None 반환.
+
+    timeout_ms 가 0이면 셀렉터마다 즉시 1회만 본다. ego 어댑터는
+    timeout 이 0보다 크면 그 시간 동안 폴링한다.
     """
     for selector in SEARCH_INPUT_SELECTORS:
         try:
@@ -119,8 +145,9 @@ async def _open_search_and_get_input(page):
     Raises:
         RuntimeError: 버튼 클릭 실패 또는 입력창을 찾지 못한 경우
     """
-    # 입력창이 이미 보이는 경우 (검색 결과 페이지) — 버튼 클릭 불필요
-    locator = await _find_visible_input(page, timeout_ms=1000)
+    # 입력창이 이미 보이는 경우 (검색 결과 페이지) — 버튼 클릭 불필요.
+    # 상세 페이지에는 입력창이 없으므로 여기서 기다리지 않는다.
+    locator = await _find_visible_input(page, timeout_ms=SEARCH_INPUT_ALREADY_VISIBLE_TIMEOUT_MS)
     if locator:
         logger.debug("검색 입력창 이미 활성화 — 버튼 클릭 생략")
         return locator
@@ -131,7 +158,7 @@ async def _open_search_and_get_input(page):
 
     await _human_wait(0.3, 0.7)
 
-    locator = await _find_visible_input(page, timeout_ms=3000)
+    locator = await _find_visible_input(page, timeout_ms=SEARCH_INPUT_AFTER_CLICK_TIMEOUT_MS)
     if locator:
         return locator
 
@@ -332,6 +359,101 @@ async def init_kream_page(context):
 # 내부 구현 (단일 시도, 페이지 재사용)
 # ---------------------------------------------------------------------------
 
+_CARD_HREFS_JS = (
+    "(selector) => [...document.querySelectorAll(selector)].map((card) => card.href)"
+)
+_NO_RESULT_TEXT_SELECTOR = "text=검색 결과가 없습니다"
+
+
+def _search_keyword(url: str | None) -> str | None:
+    """검색 URL의 keyword 쿼리를 디코딩한다. + 와 %20 은 공백이다."""
+    if not isinstance(url, str) or not url:
+        return None
+    values = parse_qs(urlsplit(url).query, keep_blank_values=True).get("keyword")
+    if not values:
+        return None
+    return values[0]
+
+
+async def _product_card_hrefs(page) -> list[str] | None:
+    """현재 화면의 검색 카드 href 목록. 읽지 못하면 None."""
+    try:
+        hrefs = await page.evaluate(_CARD_HREFS_JS, KREAM_PRODUCT_CARD_SELECTOR)
+    except Exception:
+        return None
+    if not isinstance(hrefs, list):
+        return None
+    return [href for href in hrefs if isinstance(href, str)]
+
+
+async def _location_href(page) -> str | None:
+    """실제 주소. page.url 은 명령(goto/click/fill/press) 응답 시점에만 갱신되는 캐시라 SPA 안에서 바뀐 주소를 반영하지 못한다."""
+    try:
+        href = await page.evaluate("location.href")
+    except Exception:
+        return None
+    if not isinstance(href, str):
+        return None
+    return href
+
+
+async def _search_results_rendered(
+    page,
+    model_name: str,
+    previous_hrefs: list[str] | None,
+    previous_no_result: bool,
+) -> bool:
+    """이번 검색의 실제 주소와 결과 화면이 맞춰졌으면 True.
+
+    title 은 넣지 않는다. title 이 주소·카드보다 늦게 바뀌면 이미 그려진
+    결과도 상한까지 기다리게 된다.
+    """
+    if _search_keyword(await _location_href(page)) != model_name:
+        return False
+    try:
+        no_result = await page.locator(_NO_RESULT_TEXT_SELECTOR).count() > 0
+    except Exception:
+        no_result = False
+    # 직전에도 결과 없음이면 문구가 남을 수 있다. 연속 결과 없음은 상한까지 기다린 뒤 기존 흐름으로 간다. 정확성은 유지되고 느릴 뿐이다.
+    if no_result and not previous_no_result:
+        return True
+    if previous_hrefs is None:
+        return False
+    hrefs = await _product_card_hrefs(page)
+    if not hrefs:
+        return False
+    # 연속된 비슷한 모델이 같은 카드면 상한까지 기다린 뒤 기존 흐름으로 간다. 정확성은 기존과 같고 느릴 뿐이다.
+    if hrefs == previous_hrefs:
+        return False
+    return True
+
+
+async def _wait_for_search_render(
+    page,
+    model_name: str,
+    previous_hrefs: list[str] | None,
+    previous_no_result: bool,
+) -> bool:
+    """Enter 뒤 최소 간격을 둔 다음, 상한 안에서 이번 검색 결과 렌더링을 폴링한다.
+
+    Returns:
+        True: 상한 안에 조건이 맞음
+        False: 상한까지 조건이 맞지 않음. 호출한 쪽은 기존 판정으로 이어간다.
+    """
+    # 사람처럼 보이는 간격을 유지한다.
+    await _human_wait(RENDER_MIN_WAIT_MIN_SEC, RENDER_MIN_WAIT_MAX_SEC)
+    deadline = _monotonic() + RENDER_MAX_WAIT_SEC
+    while True:
+        if await _search_results_rendered(
+            page, model_name, previous_hrefs, previous_no_result
+        ):
+            return True
+        remaining = deadline - _monotonic()
+        if remaining <= 0:
+            return False
+        await _poll_sleep(min(RENDER_POLL_INTERVAL_SEC, remaining))
+
+
 async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None:
     """
     재사용 페이지로 Kream을 단 1회 검색한다.
@@ -347,7 +469,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
     logger.info("[%s] Kream 검색 시작", model_name)
 
     # 헤더가 보이도록 맨 위로 스크롤 (검색결과 페이지에서 헤더가 숨겨질 수 있음)
-    t0 = time.monotonic()
+    t0 = _monotonic()
     try:
         await page.evaluate("window.scrollTo(0, 0)")
     except Exception:
@@ -362,21 +484,40 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         await _human_wait(0.1, 0.3)
         await _human_type(page, model_name)      # 선택된 텍스트 대체하며 새 검색어 입력
         await _human_wait(0.3, 0.8)
+        previous_hrefs = await _product_card_hrefs(page)
+        if previous_hrefs is None:
+            logger.debug("[%s] 검색 전 카드 href 스냅샷 실패", model_name)
+        try:
+            previous_no_result = await page.locator(_NO_RESULT_TEXT_SELECTOR).count() > 0
+        except Exception:
+            previous_no_result = False
         await page.keyboard.press("Enter")
         logger.debug("[%s] 검색창 입력 완료 → Enter 전송", model_name)
     except RuntimeError as exc:
         logger.warning("[%s] 검색 입력 실패: %s", model_name, exc)
         return None
 
-    # SPA 렌더링 완료 대기
-    await _human_wait(4.0, 7.0)
+    # Enter 뒤 최소 간격을 두고, 상한 안에서 이번 검색 결과 렌더링을 본다.
+    # 상한까지 안 맞으면 아래 차단·결과 없음·카드 대기를 그대로 탄다.
+    rendered = await _wait_for_search_render(
+        page, model_name, previous_hrefs, previous_no_result
+    )
     _raise_if_kream_limited(page)
     try:
         _title = await page.title()
     except Exception:
         _title = "N/A"
+    current_hrefs = await _product_card_hrefs(page)
     logger.debug(
-        "[%s] 렌더링 대기 완료 (%.1fs) url=%s title=%r", model_name, time.monotonic()-t0, page.url, _title
+        "[%s] 렌더링 대기 완료 (%.1fs) keyword=%s 스냅샷카드=%s 현재카드=%s 직전결과없음=%s title=%r 조건충족=%s",
+        model_name,
+        _monotonic() - t0,
+        _search_keyword(await _location_href(page)),
+        None if previous_hrefs is None else len(previous_hrefs),
+        None if current_hrefs is None else len(current_hrefs),
+        previous_no_result,
+        _title,
+        rendered,
     )
 
     # 차단 페이지 감지
@@ -396,19 +537,21 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
             logger.warning("[%s] 차단 페이지 감지", model_name)
         return None
 
-    # 검색 결과 없음 감지
-    no_result = await page.locator("text=검색 결과가 없습니다").count()
+    # 검색 결과 없음 감지.
+    # 연속 결과 없음이면 렌더 조건이 잔존 문구를 바로 믿지 않고, 최소 대기 뒤 7초 상한이 지난 다음에 이 문구를 본다.
+    # 그 시점은 기존 4~7초 고정 대기보다 늦으므로 더 보수적이다.
+    no_result = await page.locator(_NO_RESULT_TEXT_SELECTOR).count()
     if no_result > 0:
         logger.info("[%s] 검색 결과 없음", model_name)
         return []
 
     # 검색 결과 카드 대기
-    t0 = time.monotonic()
+    t0 = _monotonic()
     try:
         await page.wait_for_selector(
             KREAM_SELECTORS["search_results"], timeout=SELECTOR_TIMEOUT
         )
-        logger.debug("[%s] 카드 셀렉터 감지 완료 (%.1fs)", model_name, time.monotonic()-t0)
+        logger.debug("[%s] 카드 셀렉터 감지 완료 (%.1fs)", model_name, _monotonic() - t0)
     except Exception as exc:
         try:
             page_title = await page.title()
@@ -416,13 +559,13 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
         except Exception:
             page_title, body_len = "N/A", -1
         logger.warning(
-            "[%s] 카드 셀렉터 타임아웃 (%.1fs) title=%r body_len=%s error=%s", model_name, time.monotonic()-t0, page_title, body_len, type(exc).__name__
+            "[%s] 카드 셀렉터 타임아웃 (%.1fs) title=%r body_len=%s error=%s", model_name, _monotonic() - t0, page_title, body_len, type(exc).__name__
         )
         return None
 
     # 카드 데이터를 JS로 한 번에 추출
-    cards_data: list[dict] = await page.evaluate("""() => {
-        const cards = document.querySelectorAll('a.product_card[href*="/products/"]');
+    cards_data: list[dict] = await page.evaluate("""(selector) => {
+        const cards = document.querySelectorAll(selector);
         return Array.from(cards).map(card => {
             const ps = Array.from(card.querySelectorAll('p')).map(p => p.textContent.trim());
 
@@ -439,7 +582,7 @@ async def _search_kream_once(model_name: str, page) -> list[KreamProduct] | None
 
             return { href: card.href, name: nameStr, priceStr, tradeStr };
         });
-    }""")
+    }""", KREAM_PRODUCT_CARD_SELECTOR)
 
     total_found = len(cards_data)
     logger.info("[%s] 검색 결과 %s개 발견", model_name, total_found)

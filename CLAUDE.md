@@ -20,7 +20,7 @@ python main.py --mode kream    # Kream 검색만 (오늘자 *_products.json 재�
 - 사용자가 명시적으로 "커밋해줘", "푸시해줘"라고 요청한 경우에만 예외적으로 실행할 수 있다.
 
 ## agent team으로 작업할때 작업 원칙
-- 각 팀원이 변경하기 전에 plan approval을 받아야함.
+- 작업자는 별도 워크트리에서 변경하고, 병합 전에 Evaluator PASS 와 사용자 승인을 받아야 한다. (Agent Teams 의 plan approval 은 권한 모드를 바꾸지 않은 팀원이면 자동 승인되므로 변경 전 승인 장치로 쓰지 않는다)
 
 ## 소스수정원칙
 - 소스가 추가되거나 수정되면 ARCHITECTURE.md에 변경된 아키텍처를 작성할 것.

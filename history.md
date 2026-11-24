@@ -1,5 +1,16 @@
 # 변경 히스토리
 
+## 2026-11-24 — 무신사 캠페인 URL 은 Kream 에서 팔릴 만한 브랜드만 할인율 순으로 수집
+
+- [무신사] `MUSINSA_SALE_URL` 경로가 `/campaign/`으로 시작하면 `crawl_musinsa`가 Kream 브랜드 할인 모드로 분기한다. 목표는 Kream 에서 팔릴 가능성이 있는 상품만 모아 Kream 검색 시간을 줄이는 것이다. 이전에는 캠페인 형식이 지원되지 않아 경고 후 `[]`를 반환했다. `/brand/{slug}`와 `/main/.../ranking` 분기는 그대로다.
+- [무신사] 실측 근거(코디네이터, 2026-11-24). 캠페인 페이지에는 전체 상품 목록이 없고 브랜드 판매 순위와 기획 모듈뿐이라 캠페인 상품을 직접 긁지 않는다. 브랜드 PLP API(`_build_first_api_url`)에 `sortCode=DISCOUNT_RATE`를 주면 `saleRate` 내림차순으로 온다(adidas 첫 페이지 89, 84, 84, 81 … 65). 브랜드 전체는 adidas 4715개 등 너무 많다. 과거 로그에서 무신사 모델이 Kream 과 일치한 브랜드는 adidas, puma, vans, reebok, crocs, converse, camper, underarmour이고 모두 PLP slug 로 total 응답을 확인했다.
+- [무신사] `config.MUSINSA_KREAM_BRANDS`(위 8개, 사용자가 추가·삭제)를 순서대로 수집한다. 브랜드마다 `_build_discount_sorted_brand_url`의 `sortCode=DISCOUNT_RATE` 페이지를 `_crawl_brand_products(..., min_discount_rate=config.MUSINSA_MIN_DISCOUNT_RATE)`에 넘긴다. 정렬이 내림차순이므로 `saleRate`가 기준 미만인 항목이 나오면 그 항목과 이후를 버리고 다음 페이지를 요청하지 않는다. 품절·모델코드 미추출 항목도 정렬 위치를 알려주므로 변환 전에 판정한다. 기준 이상(같은 값 포함)은 남긴다. 캠페인 URL 의 query(`store`, `tab`)는 API에 넘기지 않는다. `saleRate`가 없거나 int 가 아니면 0 으로 본다. 할인 여부를 확인할 수 없는 상품이 기준을 통과하지 않게 하려는 선택이다.
+- [무신사] `MUSINSA_MIN_DISCOUNT_RATE = 30`은 과거 무신사 차익 상품이 할인 30% 이상이었다는 추정이며 검증한 값이 아니다. 브랜드 사이에만 `REQUEST_DELAY_SEC`를 쉬고, 브랜드별 완료 로그에 brand·수집 수·멈춘 할인율을 INFO 로 남긴다. 다음 주소 누락·반복·`MAX_BRAND_PAGES` 안전장치와 403/429 `CrawlBlockedError` 전파, 부분 결과 미반환은 브랜드 모드와 같다. 어느 브랜드든 실패하면 이미 받은 브랜드의 결과도 반환하지 않는다. `MUSINSA_KREAM_BRANDS`가 비면 경고 후 `[]`다.
+- [무신사] 캠페인 모드 PLP 요청에 `category=config.MUSINSA_KREAM_CATEGORY`("103", 신발)를 붙인다. `_build_discount_sorted_brand_url`만 바뀌며 brand/ranking 모드 URL 은 그대로다. 근거(코디네이터 실측, 2026-11-24). 카테고리 없이 8개 브랜드를 받으면 상품 3653개(고유 모델 3608)로 예전(약 600)의 6배이고 앞쪽은 1만원대 의류·양말이었다. 과거 무신사 차익 7건은 모두 신발이다. PLP query `category=103`을 주면 신발만 오며(adidas 4712→1477) `categoryCode`는 무시된다. 신발만이면 2282개(고유 2242), 86초다.
+- [무신사] 알려진 한계. 정렬 파라미터가 실제로 적용된다는 전제에 기대므로, 응답이 정렬되지 않으면 첫 항목에서 멈춰 적게 수집된다. 이 변경은 네트워크 없이 테스트했고 실제 무신사 응답으로의 확인은 별도 실측이 필요하다.어떤 브랜드가 첫 페이지 첫 항목에서 바로 중단돼 0개가 되면 brand·첫 항목 saleRate 와 함께 WARNING 한 줄을 남겨 이 상황을 로그에서 알아볼 수 있게 했다.
+- [무신사] 알려진 한계. (a) 중단 판정은 `saleRate`(정가 대비 할인율) 기준이라, 쿠폰으로만 30% 이상 할인되는 상품은 빠질 수 있다. (b) `MUSINSA_KREAM_BRANDS`에 같은 slug 를 두 번 넣으면 중복 수집된다.
+- [테스트] `tests/test_musinsa_collection.py`의 `KreamBrandDiscountTests`. 브랜드마다 `sortCode`·`category=103`·`brand` 요청, 할인율 경계(30 포함·29 중단·다음 페이지 미요청), 정지 항목 뒤 항목 폐기, 품절 항목에서의 중단, `saleRate` 없음·None·문자열, 브랜드 순서 유지와 브랜드 사이 간격, 403/429 전파, 빈 브랜드 목록, 브랜드 URL 모드가 할인율로 거르지 않고 `sortCode`·`category`를 붙이지 않음, 지원하지 않는 형식 경고에 `/campaign/` 포함을 확인한다.
+
 ## 2026-11-17 — Kream 검색의 셀렉터 폴링과 고정 렌더 대기를 줄임
 
 - [Kream] 2026-11-16 로그, 검색 2721회, Kream 단계 13.9시간. "검색 시작 → 검색 버튼 클릭 완료" 평균 8.4초(2004회, 전체 34%). ego `is_visible(timeout)`이 timeout 동안 폴링하는데, 상세 페이지에는 입력창이 없어 셀렉터 4개 × 1초를 기다리고, `SEARCH_BUTTON_SELECTORS`의 긴 `#wrap` 경로가 2초를 기다렸다. 그 경로는 2004회 중 0회 일치했고 클릭은 전부 `button.btn_search`, 입력창은 전부 `input.input_search`였다. "Enter → 렌더링 대기 완료" 평균 5.5초(전체 30%)는 고정 `_human_wait(4.0, 7.0)`이다.

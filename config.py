@@ -67,6 +67,13 @@ ADIDAS_SALE_URL = ""
 SPECIAL_SALE_URL = ""
 SPECIAL_MODEL_STRATEGY = "auto"
 MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+# MUSINSA_SALE_URL 이 /campaign/ 으로 시작하면 이 브랜드만 수집한다. 과거 Kream 과 모델이 일치한 브랜드이며 사용자가 추가·삭제한다.
+MUSINSA_KREAM_BRANDS: tuple[str, ...] = ("adidas", "puma", "vans", "reebok", "crocs", "converse", "camper", "underarmour")
+# 브랜드마다 할인율 내림차순으로 받다가 이 값(%) 미만이 나오면 멈춘다. 과거 차익 상품이 할인 30% 이상이었다는 추정이며 검증한 값이 아니다.
+MUSINSA_MIN_DISCOUNT_RATE = 30
+# 캠페인 모드에서 PLP API query category 로 넘기는 무신사 신발 카테고리 코드. 과거 무신사 차익 7건이 모두 신발이었고,
+# 의류·양말까지 받으면 8개 브랜드 수집이 약 600개에서 3653개로 6배가 된다(2026-11-24 실측, 신발만 2282개·86초).
+MUSINSA_KREAM_CATEGORY = "103"
 # SSF SHOP ADIDAS KOREA 브랜드관 전체 상품. 의류·잡화·신발을 URL 그대로 수집한다.
 SSFSHOP_SALE_URL = "https://www.ssfshop.com/ADIDAS-KOREA/main?dspCtgryNo=SFM&brandShopNo=BDMA29AKU&brndShopId=RTADA&currentPage=1&sortColumn=BEST_DC_SEQ&serviceType=DSP&ctgrySectCd=GNRL_CTGRY&fitPsbYn=N&subBrndCtgryGodYn=Y&cnrSn=23416&cnrSetSn=367764"
 

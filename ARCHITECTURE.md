@@ -82,7 +82,7 @@ resell-sniper/
 │   ├── __init__.py
 │   └── crawler.py        # crawl_adidas() — 세일 목록, HTTP 진단·MarketplaceProduct 포맷 저장
 │
-├── musinsa/              # 무신사 브랜드 PLP·아울렛 랭킹 API 크롤러
+├── musinsa/              # 무신사 브랜드 PLP·아울렛 랭킹·캠페인(Kream 브랜드 할인) API 크롤러
 │   ├── __init__.py
 │   └── crawler.py        # crawl_musinsa() — 무신사 상품, MarketplaceProduct 포맷 저장
 │
@@ -142,7 +142,7 @@ resell-sniper/
 ├── tests/
 │   ├── test_atomic_io.py         # JSON 원자적 쓰기: 내용·새 파일 권한·기존 권한 유지, 실패 시 기존 파일·임시 파일 정리, 부모 디렉터리 미생성
 │   ├── test_adidas_http.py       # HTTP 상태·재시도·진단의 write_json_atomic 저장·페이지 진행 회귀 테스트
-│   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락·반복 예외·브랜드 페이지 상한·페이지 사이 요청 간격 회귀 테스트
+│   ├── test_musinsa_collection.py # 수집 도중 실패 시 예외 전파·403/429 차단 변환·다음 주소 누락·반복 예외·브랜드 페이지 상한·페이지 사이 요청 간격, 캠페인 Kream 브랜드 할인 모드(정렬 요청·할인율 경계·중단·브랜드 순서·브랜드 사이 간격·차단 전파) 회귀 테스트
 │   ├── test_sequential_crawling.py # 순차 처리·휴식·접근 제한 중단 회귀 테스트
 │   ├── test_browser.py           # 독립 Chrome 실행·단일 탭·실패 정리 테스트
 │   ├── test_naver_diagnostics.py # 보호·로그인·HTTP 제한·개인정보 제외·진단 저장 실패 회귀 테스트
@@ -250,23 +250,31 @@ resell-sniper/
 - 저장 포맷: `MarketplaceProduct` (site_name="special") → `output/YYYYMMDD/special_products.json`
 
 ### musinsa/crawler.py
-- `crawl_musinsa()` — `config.MUSINSA_SALE_URL` 형식에 따라 브랜드 PLP 또는 main 랭킹 크롤러로 분기. URL 미설정/빈 값이면 즉시 [] 반환.
+- `crawl_musinsa()` — `config.MUSINSA_SALE_URL` 형식에 따라 캠페인(Kream 브랜드 할인), main 랭킹, 브랜드 PLP 크롤러로 이 순서로 분기. URL 미설정/빈 값이면 즉시 [] 반환. 어느 형식도 아니면 경고 후 [].
 - `_extract_brand_slug(page_url)` — `/brand/{brand}/...` URL에서 브랜드 slug 추출.
+- `_is_campaign_url(page_url)` — 경로가 `/campaign/`으로 시작하는 URL 판별.
 - `_is_ranking_url(page_url)` — `/main/.../ranking` URL 판별.
+- `_build_discount_sorted_brand_url(brand)` — `https://www.musinsa.com/brand/{brand}/products?sortCode=DISCOUNT_RATE`. 첫 API URL은 `_build_first_api_url`이 이 query를 보존해 만든다.
 - `_build_referer(page_url, brand)` — 캠페인 URL을 API Referer용 `/brand/{brand}/products?...` 형태로 정규화.
 - `_build_first_api_url(page_url, brand, page_size)` — 사용자 URL의 query(`gf`, `sortCode` 등)를 보존하고 `brand`, `page=1`, `size=100`, `caller=FLAGSHIP`을 붙여 첫 API URL 생성.
 - `_build_ranking_api_url(page_url)` — 랭킹 페이지 query를 `client.musinsa.com/api/home/web/v5/pans/ranking` URL로 변환.
 - `_fetch_json(url, referer)` / `_fetch_json_async(url, referer)` — stdlib urllib 요청을 `asyncio.to_thread`로 실행. `HTTPError`는 `common.pacing.check_response`를 거쳐 403/429는 `CrawlBlockedError`로 바뀌고, 다른 HTTP 오류는 원래 예외 그대로 전파.
 - `_resolve_price(item)` — DOM 카드 가격과 일치하는 `finalPrice` 우선, 없으면 `couponPrice`, `price` 순으로 폴백.
+- `_resolve_sale_rate(item)` — PLP 항목의 `saleRate`(%). 없거나 int가 아니면 0.
 - `_build_marketplace_products(...)` — 두 API의 공통 필드를 `slash_first` 모델 전략으로 변환하며 품절·모델코드 미추출 상품 제외.
 - `_to_marketplace_products(item, crawled_at)` / `_to_ranking_marketplace_products(item, crawled_at)` — 브랜드 PLP/랭킹 API 항목을 공통 변환기로 전달.
 - `_extract_ranking_items(data)` — 랭킹 API `MULTICOLUMN` 모듈의 `PRODUCT_COLUMN` 항목 평탄화.
-- `_crawl_brand_products(sale_url, crawled_at)` — 브랜드 PLP `pagination.nextPageUrl`의 `hmacId`를 따라 페이지를 수집한다. 안전 상한은 `MAX_BRAND_PAGES = 100`.
+- `_crawl_brand_products(sale_url, crawled_at, min_discount_rate=None)` — 브랜드 PLP `pagination.nextPageUrl`의 `hmacId`를 따라 페이지를 수집한다. 안전 상한은 `MAX_BRAND_PAGES = 100`. `min_discount_rate`가 있으면 목록이 할인율 내림차순이라는 전제로, 품절·모델코드 미추출 항목을 포함해 `saleRate`가 그 값 미만인 항목이 나오는 순간 그 항목과 이후를 버리고 다음 페이지를 요청하지 않는다. 완료 로그에 brand와 멈춘 할인율을 남긴다.
+- `_crawl_kream_brand_discount_products(crawled_at)` — `config.MUSINSA_KREAM_BRANDS` 순서대로 `_crawl_brand_products(_build_discount_sorted_brand_url(brand), ..., min_discount_rate=config.MUSINSA_MIN_DISCOUNT_RATE)`를 호출해(URL에 `sortCode=DISCOUNT_RATE`와 `category=config.MUSINSA_KREAM_CATEGORY`가 붙는다) 결과를 이어 붙인다. 브랜드 사이에만 `REQUEST_DELAY_SEC` 대기. 브랜드 목록이 비면 경고 후 []. 캠페인 URL의 query는 API에 넘기지 않는다.
 - `_crawl_ranking_products(sale_url, crawled_at)` — 랭킹 API `link.next`를 따라 최대 20페이지 수집.
 - 수집 도중 요청이 실패하면 예외가 그대로 전파되며 부분 결과를 반환하지 않는다(403/429는 `CrawlBlockedError`로 파이프라인 중단, 그 외는 main이 경고 후 파일을 저장하지 않음). 랭킹의 API 항목 없음은 정상 종료로 그때까지 수집한 결과를 반환한다.
 - 브랜드 페이지네이션: 1페이지 응답의 `pagination.nextPageUrl`을 그대로 따라간다. 2페이지 이후 API는 `hmacId`가 필요하므로 page 번호를 직접 조립하지 않는다.
 - `pagination.hasNext`가 참인데 `nextPageUrl`이 비어 있으면(None, 빈 문자열) `RuntimeError`를 던지고 부분 결과를 반환하지 않는다. `hasNext`가 거짓이면 정상 종료한다.
 - 다음 주소가 반복되거나 `MAX_BRAND_PAGES`에 닿고도 `hasNext`면 예외, 부분 결과 미반환. 첫 요청 주소도 방문 집합에 들어간다. `hasNext`가 거짓이면 상한 페이지를 포함해 정상 종료한다.
+- 캠페인 모드(`/campaign/...`): 캠페인 페이지에는 전체 상품 목록이 없어 URL을 긁지 않고 `MUSINSA_KREAM_BRANDS`의 브랜드 PLP를 `sortCode=DISCOUNT_RATE`·`category=103`(신발만)으로 받는다. 할인율 `MUSINSA_MIN_DISCOUNT_RATE`(%) 이상은 포함, 미만이 나오면 그 브랜드를 멈추고 다음 브랜드로 간다. 브랜드 안 안전장치(다음 주소 누락·반복, `MAX_BRAND_PAGES`)와 403/429 전파, 부분 결과 미반환은 브랜드 URL 모드와 같다. 어느 브랜드든 요청이 실패하면 예외가 전파되고 이미 받은 브랜드의 결과도 반환하지 않는다.
+  - 첫 페이지 첫 항목에서 바로 중단돼 0개가 되면 브랜드·첫 항목 saleRate 와 함께 WARNING 을 남긴다(정렬 미적용 또는 할인 상품 없음 의심).
+  - 알려진 한계 1: 중단 판정은 `saleRate`(정가 대비 할인율) 기준이라, 쿠폰으로만 30% 이상 할인되는 상품은 빠질 수 있다.
+  - 알려진 한계 2: `MUSINSA_KREAM_BRANDS`에 같은 slug 를 두 번 넣으면 중복 수집된다.
 - 저장 포맷: `MarketplaceProduct` (site_name="musinsa") → `output/YYYYMMDD/musinsa_products.json`
 
 ### ssfshop/crawler.py
@@ -409,7 +417,10 @@ resell-sniper/
 | `OUTPUT_DIR` | "output" | 결과 저장 루트 디렉토리 |
 | `NIKE_SALE_URL` | `""` | 나이키 성인 세일 신발 URL. 빈 문자열이면 비활성, 크롤러는 `config.NIKE_SALE_URL` 을 직접 읽음. 예시: `https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok` |
 | `ADIDAS_SALE_URL` | `""` | 아디다스 세일 목록 URL. 빈 문자열이면 비활성, 크롤러는 `config.ADIDAS_SALE_URL` 을 직접 읽음. 예시: `https://www.adidas.co.kr/outlet?grid=true` (공식 아울렛 전체보기, grid=true 필수). 의류·신발·용품 포함, Kids 제외 |
-| `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원 |
+| `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원. `/campaign/...` URL이면 아래 두 상수로 Kream 브랜드 할인 모드 |
+| `MUSINSA_KREAM_BRANDS` | adidas, puma, vans, reebok, crocs, converse, camper, underarmour | 캠페인 모드에서 수집할 브랜드 slug 튜플. 과거 로그에서 Kream과 모델이 일치한 브랜드이며 순서대로 수집 |
+| `MUSINSA_MIN_DISCOUNT_RATE` | 30 | 캠페인 모드 할인율 하한(%). 이 값 이상만 수집하고 미만이 나오면 그 브랜드 수집을 멈춘다. 과거 차익 상품이 30% 이상이었다는 추정값 |
+| `MUSINSA_KREAM_CATEGORY` | 103 | 캠페인 모드 PLP API query `category`로 넘기는 무신사 신발 카테고리 코드. 과거 차익 7건이 모두 신발이고, 의류·양말까지 받으면 8개 브랜드 수집이 약 600개에서 3653개로 6배가 된다(2026-11-24 실측, 신발만 2282개·86초). `categoryCode`는 API가 무시한다 |
 | `SSFSHOP_SALE_URL` | ssfshop.com/ADIDAS-KOREA/main?...brandShopNo=BDMA29AKU | SSF SHOP ADIDAS KOREA 브랜드관 전체(의류·잡화·신발). 빈 문자열이면 비활성, 크롤러는 `config.SSFSHOP_SALE_URL`을 직접 읽음. `currentPage`는 1부터 덮어씀 |
 | `SPECIAL_SALE_URL` | `""` | 범용 적응형 크롤러 대상 URL. 빈 문자열이면 비활성, 크롤러는 `config.SPECIAL_SALE_URL` 을 직접 읽음. 예시: `https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579` |
 | `SPECIAL_MODEL_STRATEGY` | "auto" | special 상품명 모델 추출 전략 |

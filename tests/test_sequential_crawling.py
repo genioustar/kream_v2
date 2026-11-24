@@ -6,12 +6,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import config
 import main as pipeline
+from common.models import MarketplaceProduct
 from common.pacing import CrawlBlockedError, check_response, pause
 from kream.crawler import (
     iter_kream_results, search_kream, _find_verified_kream_product,
     _record_kream_response, _search_kream_once,
 )
 from naver.crawler import crawl_marketplace
+
+
+def _product(model_name: str) -> MarketplaceProduct:
+    return MarketplaceProduct(
+        site_name="musinsa", product_name="p", model_name=model_name,
+        price=100000, url=None, crawled_at="2026-11-24T00:00:00",
+    )
 
 
 class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
@@ -24,7 +32,7 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
         manager.__aexit__ = AsyncMock(return_value=False)
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(config, "OUTPUT_DIR", directory), \
-             patch("main._load_all_products", return_value=[MagicMock(model_name="A")]), \
+             patch("main._load_all_products", return_value=[_product("A")]), \
              patch("main.discover_dates", return_value=[]), \
              patch("main.create_browser", return_value=manager), \
              patch("main.iter_kream_results", results), \
@@ -43,7 +51,7 @@ class SequentialCrawlingTests(unittest.IsolatedAsyncioTestCase):
         manager.__aexit__ = AsyncMock(return_value=False)
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(config, "OUTPUT_DIR", directory), \
-             patch("main._load_all_products", return_value=[MagicMock(model_name="A")]), \
+             patch("main._load_all_products", return_value=[_product("A")]), \
              patch("main.discover_dates", return_value=[]), \
              patch("main.create_browser", return_value=manager), \
              patch("main._save_kream_cache", wraps=pipeline._save_kream_cache) as save_cache:

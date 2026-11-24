@@ -32,9 +32,11 @@ from adidas.crawler import crawl_adidas
 from diff_output import diff_date_pair, discover_dates
 from kream.cache import (
     KREAM_CACHE_DIR_NAME,
-    NEGATIVE_CACHE_TTL_DAYS,
+    NEGATIVE_TTL_DAYS,
     KreamCache,
     exclude_fresh_negative,
+    lowest_prices_by_model,
+    record_unprofitable_models,
 )
 from kream.comparator import find_arbitrage
 from kream.crawler import iter_kream_results
@@ -193,6 +195,14 @@ def _save_kream_cache(cache: KreamCache) -> None:
         logger.warning("Kream 캐시 저장 실패 (파이프라인은 계속): %s", exc)
 
 
+def _describe_excluded(excluded_by_reason: dict[str, int]) -> str:
+    """사유별 제외 개수를 유효기간과 함께 한 줄로 만든다."""
+    return ", ".join(
+        "%s %s개(%s일)" % (reason, count, NEGATIVE_TTL_DAYS[reason])
+        for reason, count in excluded_by_reason.items()
+    )
+
+
 def _extract_models_from_diff(diff_path: Path) -> list[str]:
     """diff 파일의 added/modified 항목에서 고유 model_name 목록을 순서대로 반환한다."""
     data = json.loads(diff_path.read_text(encoding="utf-8"))
@@ -303,11 +313,14 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
 
     cache = KreamCache(base_output_dir / KREAM_CACHE_DIR_NAME)
     cache.load()
-    search_models = exclude_fresh_negative(unique_models, cache, date.today())
+    lowest_prices = lowest_prices_by_model(all_products)
+    search_models, excluded_by_reason = exclude_fresh_negative(
+        unique_models, cache, date.today(), lowest_prices
+    )
     logger.info(
-        "부정 캐시로 %s개 제외 (유효기간 %s일)",
+        "부정 캐시로 %s개 제외 — %s",
         len(unique_models) - len(search_models),
-        NEGATIVE_CACHE_TTL_DAYS,
+        _describe_excluded(excluded_by_reason),
     )
     if not search_models:
         logger.info("검색할 모델 없음 — 브라우저를 열지 않습니다.")
@@ -362,6 +375,9 @@ async def main(mode: str, site_keys: list[str] | None = None) -> None:
         chunk_results = find_arbitrage(all_products, kream_products_map)
         arbitrage_results.extend(chunk_results)
         arbitrage_results.sort(key=lambda r: r.price_diff, reverse=True)
+
+        # crawler 의 일치 시 부정 항목 삭제는 위 검색 중에 끝났으므로, 여기서 기록한 사유가 같은 실행에서 지워지지 않는다.
+        record_unprofitable_models(cache, kream_products_map, lowest_prices, date.today())
 
         # 청크 결과와 같은 시점. 검색 중단이어도 여기까지 온 기록은 남긴다.
         _save_kream_cache(cache)

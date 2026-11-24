@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-def _effective_price(p: MarketplaceProduct) -> int:
+def effective_price(p: MarketplaceProduct) -> int:
     """sale_price 가 있으면 그것을, 없으면 price 를 반환한다."""
     return p.sale_price if p.sale_price is not None else p.price
 
 
-def _is_opportunity(marketplace_price: int, kream_price: int, trade_count: int) -> bool:
+def is_opportunity(marketplace_price: int, kream_price: int, trade_count: int) -> bool:
     """
     단일 상품 쌍이 차익 거래 조건을 만족하는지 판단한다.
 
@@ -89,10 +89,10 @@ def find_arbitrage(
                 )
                 continue
 
-            effective = _effective_price(marketplace)
+            effective = effective_price(marketplace)
             price_diff = kream.kream_price - effective
 
-            if not _is_opportunity(effective, kream.kream_price, kream.trade_count):
+            if not is_opportunity(effective, kream.kream_price, kream.trade_count):
                 logger.debug(
                     "[%s] 필터 탈락 — 가격차=%s원 (기준: %s), 거래량=%s (기준: %s)", marketplace.model_name, format(price_diff, ","), format(MIN_PRICE_DIFF, ","), kream.trade_count, MIN_TRADE_COUNT
                 )

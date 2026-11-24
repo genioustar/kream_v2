@@ -39,14 +39,20 @@ main.py --mode full (기본)
   │     │     │     오늘자 *_products.json 전체에서 고유 model_name 추출
   │     │     └── 그 외 날짜 (kream 모드 포함)
   │     │           diff 생성 후 모든 *_diff.json 의 added/modified 에서 model_name 추출
-  │     ├── output/kream_cache 의 유효한 검색 부정 캐시(7일)를 제외. 전부 빠지면 브라우저를 열지 않음
+  │     ├── output/kream_cache 의 유효한 검색 부정 캐시를 사유별 유효기간으로 제외하고 사유별 개수를 한 줄로 남김
+  │     │     (no_result·no_match·low_trade 7일, price_gap 3일. price_gap 은 판매처 최저가가 기록 때보다 내려가면 다시 검색.
+  │     │      low_trade·price_gap 은 기록 때 기준값이 지금 config 와 다르거나 없으면 다시 검색)
+  │     │     전부 빠지면 브라우저를 열지 않음
   │     ├── 200개 초과 시 200개씩 청크 분할 (추가 휴식 없음)
   │     └── 각 청크마다:
   │           1. kream/crawler.py 로 Kream 검색 후 상세 모델번호 완전 일치 검증
   │              (단일 탭 재사용, 검색별 상위 5개 후보, 상세 모델번호 캐시 적중 시 페이지 이동 없음)
   │           2. kream/comparator.py 로 모델번호 재검증 + 차익 비교 (누적)
-  │           3. output/YYYYMMDD/arbitrage_results.json 즉시 저장
-  │           4. output/kream_cache 저장. 일부 결과 뒤 중단이면 차익 저장과 같은 시점.
+  │           3. kream/cache.py 로 검증을 통과한 결과 중 차익 조건에서 탈락한 모델을 low_trade·price_gap 으로 기록
+  │              (crawler 의 일치 시 삭제가 검색 중에 끝난 뒤라 같은 실행에서 지워지지 않음. 통과 모델은 기록하지 않고 기존 항목 삭제.
+  │               거래량 0 이 청크 검증 결과의 80% 를 넘으면 거래량 문구 형식 변경으로 보고 그 청크의 low_trade 는 기록하지 않음)
+  │           4. output/YYYYMMDD/arbitrage_results.json 즉시 저장
+  │           5. output/kream_cache 저장. 일부 결과 뒤 중단이면 차익 저장과 같은 시점.
   │              결과가 없이 바로 중단이면 차익 파일 전에 캐시만 저장하고 다시 올린다. 저장 실패는 경고 후 계속
   │
   └── STEP 4: diff_output.py (전체 크롤 날짜에만 실행)
@@ -109,7 +115,7 @@ resell-sniper/
 ├── kream/                # Kream 크롤러 + 가격 비교
 │   ├── __init__.py
 │   ├── crawler.py        # init_kream_page(), search_kream()
-│   ├── cache.py          # 상세 모델번호·검색 부정 캐시 로드·조회·기록·저장
+│   ├── cache.py          # 상세 모델번호·검색 부정 캐시 로드·조회·기록·저장, 부정 사유 판정
 │   ├── parser.py         # Kream 셀렉터, 가격·거래량·상세 모델번호 파싱/비교
 │   ├── comparator.py     # find_arbitrage()
 │   └── history_marker.py # 직전 날짜 결과와 비교해 저장 이력·가격 변동 표시
@@ -151,7 +157,7 @@ resell-sniper/
 │   ├── test_naver_parser.py      # page_origin·clean_url(base 필수) 회귀 테스트
 │   ├── test_naver_public_search.py # 공개 검색 UI·검색 조건 검증 회귀 테스트
 │   ├── test_kream_model_match.py # Kream 상세 모델번호 DOM None·goto 예외 후 계속 읽기·차단·검증·비교 회귀 테스트
-│   ├── test_kream_cache.py       # Kream 상세 모델번호·검색 부정 캐시 로드·TTL·기록 조건·검색 목록 제외
+│   ├── test_kream_cache.py       # Kream 상세 모델번호·검색 부정 캐시 로드·사유별 TTL·기록 조건·low_trade/price_gap 판정·가격 하락 재검색·기준값 변경 재검색·거래량 0 청크 가드·검색 목록 제외
 │   ├── test_kream_search_flow.py # Kream 검색 입력 즉시 판정·버튼 셀렉터·렌더링 조건 대기
 │   ├── test_history_marker.py    # 직전 결과 비교 표시(new/same/changed) 회귀 테스트
 │   ├── test_main_site_registry.py # STEP 1 등록 표·--site 파싱·재수집·네이버 빈 결과 유지·full은 재수집 안 함·종료 코드·__main__ 제거
@@ -193,6 +199,8 @@ resell-sniper/
 - `_load_products_json(path)` — 단일 `*_products.json` → `MarketplaceProduct` 리스트 복원
 - `_apply_sale_price(products, source_key)` — STEP 1 각 크롤러 결과에 `config.SITE_DISCOUNT_RATES[source_key]` 할인율을 적용해 `sale_price` 부여. 0%면 sale_price=None 유지
 - `_extract_models_from_diff(diff_path)` — diff 파일의 added/modified 항목에서 model_name 추출
+- `_describe_excluded(excluded_by_reason)` — `exclude_fresh_negative`가 센 사유별 제외 개수를 `사유 N개(유효기간일)` 목록 한 줄로 만든다. `부정 캐시로 N개 제외 — no_result 0개(7일), no_match 0개(7일), low_trade 0개(7일), price_gap 0개(3일)` 로그에 쓴다.
+- Kream 단계 시작: `lowest_prices_by_model(all_products)`로 모델별 판매처 최저가를 한 번 만들어 제외 판정과 청크별 기록에 같이 쓴다. 청크마다 `find_arbitrage` 바로 뒤, `_save_kream_cache` 앞에서 `record_unprofitable_models`를 호출한다.
 - `KREAM_CHUNK_SIZE = 200` — 청크 분할 기준 (모델 수가 이를 초과하면 분할)
 - STEP 2~3 모델명 소스: 전체 크롤 날짜(1·10·20·30일)는 `*_products.json` 전체, 그 외 날짜는 `*_diff.json` 전체
 - 검색할 모델이 없으면 브라우저를 열지 않는다. diff에 변경이 없으면 전체 모델 검색으로 폴백하지 않는다.
@@ -358,12 +366,16 @@ resell-sniper/
 
 ### kream/cache.py
 - `KREAM_CACHE_DIR_NAME` — `kream_cache`. 캐시 디렉터리는 `output/kream_cache/`다. 날짜 폴더 밖에 둔다.
-- `NEGATIVE_CACHE_TTL_DAYS` — 7. 새로 등록된 상품을 놓치는 최대 기간이다. `checked_at`부터 오늘까지 일수가 0 이상 7 미만이면 유효하다. 미래 날짜(음수 일수)와 7일 이상은 만료다.
-- `DETAIL_CACHE_FILENAME` / `NEGATIVE_CACHE_FILENAME` — `detail_model_numbers.json` `{상품 URL: 모델번호}`, `search_negative.json` `{모델명: {"checked_at": "YYYY-MM-DD", "reason": "no_result" | "no_match"}}`.
+- `NEGATIVE_TTL_DAYS` — 부정 사유 → 유효기간 일수 표이고 사유 목록의 단일 출처다. `no_result`·`no_match` 7일(`SEARCH_MISS_TTL_DAYS`, 새로 등록된 상품을 놓치는 최대 기간), `low_trade` 7일(`LOW_TRADE_TTL_DAYS`, 거래량은 며칠 사이 `MIN_TRADE_COUNT`를 넘기 어렵다는 추정), `price_gap` 3일(`PRICE_GAP_TTL_DAYS`, Kream 가격이 거래량보다 빨리 움직인다는 추정). `checked_at`부터 오늘까지 일수가 0 이상 TTL 미만이면 유효하고 미래 날짜(음수 일수)와 TTL 이상은 만료다.
+- `DETAIL_CACHE_FILENAME` / `NEGATIVE_CACHE_FILENAME` — `detail_model_numbers.json` `{상품 URL: 모델번호}`, `search_negative.json` `{모델명: {"checked_at": "YYYY-MM-DD", "reason": 사유}}`. 사유는 `no_result` | `no_match` | `low_trade` | `price_gap`이고, `price_gap` 항목만 기록 당시 `kream_price`·`marketplace_price`(정수)를 더 가진다. `low_trade`는 기록 시점 `MIN_TRADE_COUNT`를 `min_trade_count`(`LOW_TRADE_CRITERION_FIELD`)에, `price_gap`은 `MIN_PRICE_DIFF`를 `min_price_diff`(`PRICE_GAP_CRITERION_FIELD`)에 정수로 저장한다. `no_result`·`no_match`는 기준과 무관해 저장하지 않는다. 가격 필드가 없는 옛 `no_result`·`no_match` 파일은 그대로 읽는다.
 - `detail_cache_key(product_url)` — 캐시 키. `card.href` 실측(`logs/crawler_20261116.log` 2195건)은 `https://kream.co.kr/products/{id}`뿐이라 쿼리·끝 슬래시를 자르지 않는다.
-- `KreamCache(directory)` — `load()`는 파일이 없으면 빈 캐시, JSON이 깨졌거나 형식이 다르면 경고 후 그 파일만 빈 캐시로 시작한다. `detail_model` / `remember_detail_model` / `remember_negative` / `drop_negative` / `negative_is_fresh(model_name, today)`. `save()`는 디렉터리를 만든 뒤 두 파일을 `write_json_atomic`으로 쓴다. 저장 실패는 호출한 `main._save_kream_cache`가 경고만 남기고 파이프라인을 계속한다.
-- `exclude_fresh_negative(model_names, cache, today)` — 유효한 부정 캐시 모델명을 검색 목록에서 뺀다. `main`이 그 결과를 청크 분할 전에 검색 대상으로 쓰고 `부정 캐시로 N개 제외 (유효기간 7일)`을 남긴다. 남은 목록이 비면 기존 `검색할 모델 없음` 경로로 브라우저를 열지 않는다.
+- `KreamCache(directory)` — `load()`는 파일이 없으면 빈 캐시, JSON이 깨졌거나 형식이 다르면(필드 집합·날짜·가격·기준값 정수 불일치. 판매처 가격이 문자열·bool인 `price_gap` 항목도 여기 든다) 경고 후 그 파일만 빈 캐시로 시작해 모델을 다시 검색한다. 기준값 필드가 없는 `low_trade`·`price_gap` 항목은 형식 불일치가 아니고 그대로 읽되 `negative_is_fresh`가 거짓이다. 알 수 없는 사유 항목만은 파일 전체를 버리지 않고 경고 한 줄을 남긴 뒤 그 항목만 건너뛰어 제외하지 않는다. `detail_model` / `remember_detail_model` / `remember_negative(model_name, reason, checked_on, *, kream_price=None, marketplace_price=None)` / `drop_negative` / `negative_is_fresh(model_name, today, lowest_price=None)`. `remember_negative`는 `price_gap`에만 두 가격을 요구하고 다른 사유에 가격을 주면 `ValueError`다. `low_trade`·`price_gap`은 호출 시점의 `MIN_TRADE_COUNT`·`MIN_PRICE_DIFF`를 항목에 함께 저장한다. `negative_is_fresh`는 사유별 TTL을 따르고, `low_trade`·`price_gap`은 저장된 기준값이 지금 `MIN_TRADE_COUNT`·`MIN_PRICE_DIFF`와 다르거나 없으면 유효기간 안이어도 거짓이다(기준이 바뀌면 옛 판정이 차익 모델을 가릴 수 있어서다). `price_gap`은 현재 판매처 최저가가 기록 때 `marketplace_price`보다 낮거나 모르면(`None`)에도 거짓이다. `save()`는 디렉터리를 만든 뒤 두 파일을 `write_json_atomic`으로 쓴다. 저장 실패는 호출한 `main._save_kream_cache`가 경고만 남기고 파이프라인을 계속한다.
+- `lowest_prices_by_model(products)` — 모델명(앞뒤 공백 제거)별 판매처 최저 실구매가(`comparator.effective_price`). 여러 판매처 상품이 있어도 최저가 하나다.
+- `exclude_fresh_negative(model_names, cache, today, lowest_prices)` — 유효한 부정 캐시 모델명을 검색 목록에서 빼고 `(남은 목록, 사유별 제외 개수)`를 반환한다. 순서는 유지하고 개수는 `NEGATIVE_TTL_DAYS`의 모든 사유를 키로 가진다. `lowest_prices`에 없는 모델은 `price_gap`을 믿지 않고 다시 검색한다. `main`이 그 결과를 청크 분할 전에 검색 대상으로 쓰고 사유별 개수를 한 줄로 남긴다. 남은 목록이 비면 기존 `검색할 모델 없음` 경로로 브라우저를 열지 않는다.
+- `judge_unprofitable(kream_products, lowest_price)` — 모델번호 검증을 통과한 Kream 상품(1개 이상)을 판매처 최저가와 비교하는 순수 함수. 하나라도 `comparator.is_opportunity`를 통과하면 `None`이다. 통과가 없고 거래량(`MIN_TRADE_COUNT`)이 충분한 상품도 없으면 `low_trade`, 있으면 `price_gap`이다. 둘 다 모자라면 `low_trade`가 먼저다. `price_gap`은 거래량이 충분한 상품 중 Kream 가격이 가장 높은 쪽의 `kream_price`와 `lowest_price`를 `NegativeVerdict`에 담는다.
+- `record_unprofitable_models(cache, kream_products_map, lowest_prices, today)` — 청크마다 `find_arbitrage` 직후, 캐시 저장 전에 `main`이 호출한다. 검증 통과 결과(비어 있지 않은 목록)만 판정한다. 빈 결과(결과 없음·불일치)는 crawler가 이미 기록했으니 건드리지 않고, 검색 못 한 모델은 맵에 없어 기록되지 않는다. 차익 조건을 통과한 모델은 기록하지 않고 기존 부정 항목을 지운다. 판매처 가격이 없는 모델은 경고 후 건너뛴다. 한 청크의 검증 통과 결과(Kream 상품 단위, 20개 이상 `LOW_TRADE_ZERO_MIN_SAMPLE`) 중 `trade_count == 0` 비율이 `LOW_TRADE_ZERO_RATIO_LIMIT`(0.8)을 넘으면 거래량 문구 형식이 바뀌어 0으로 잘못 읽은 것으로 보고 그 청크의 `low_trade`를 하나도 기록하지 않고 WARNING 한 줄(비율, 개수)을 남긴다. `price_gap` 기록과 통과 모델의 기존 항목 삭제는 그대로이고, 그 청크의 기존 `low_trade` 항목도 건드리지 않는다. 한도 근거는 logs 실측 거래량 0 비율의 날짜별 최대 48%·청크별 최대 76%이고, 오탐해도 검색이 늘 뿐 모델을 가리지 않는다. crawler의 일치 시 `drop_negative`는 검색 중에 끝나므로 이 기록이 같은 실행에서 지워지지 않는다. 청크마다 `부정 캐시 기록 — low_trade N개, price_gap N개, 차익 조건 통과 N개`를 INFO로 남긴다.
 - 캐시를 끄는 실행 옵션은 없다. 비우려면 `output/kream_cache/`를 삭제한다. 모델번호 파싱·비교 규칙을 바꾸면 `output/kream_cache/`를 삭제한다.
+- 새 캐시 파일을 옛 코드(병합 전 main)로 읽으면 형식 불일치로 부정 캐시 전체가 비워진다. 병합 전에는 같은 `output/`으로 옛 코드를 실행하지 않는다.
 - 같은 캐시 디렉터리를 두 실행이 동시에 저장하면 나중 저장이 파일을 덮어쓴다. 파일은 깨지지 않고, 기록은 덜 쌓인 쪽이 된다.
 
 ### kream/parser.py
@@ -375,9 +387,9 @@ resell-sniper/
 - `parse_kream_price()` / `parse_trade_count()` — 검색 카드 가격·거래량 문자열 파싱
 
 ### kream/comparator.py
-- `_effective_price(p)` — MarketplaceProduct의 sale_price가 있으면 그것을, 없으면 price를 반환
-- `_is_opportunity(marketplace_price, kream_price, trade_count)` — 거래량·가격차 필터 판정
-- `find_arbitrage(marketplace_products, kream_products_map)` — 가격·거래량 필터 전에 마켓 상품 모델번호와 Kream 상세 모델번호를 다시 완전 일치 비교한다. 가격 기준은 `_effective_price(marketplace)`이며 `ArbitrageResult.marketplace_price = effective price`, `price_diff = kream_price - effective_price`
+- `effective_price(p)` — MarketplaceProduct의 sale_price가 있으면 그것을, 없으면 price를 반환. `kream/cache.py`의 판매처 최저가도 이 함수를 쓴다.
+- `is_opportunity(marketplace_price, kream_price, trade_count)` — 거래량·가격차 필터 판정. `kream/cache.py`의 `judge_unprofitable`이 같은 판정을 써 차익 조건과 부정 기록이 어긋나지 않는다.
+- `find_arbitrage(marketplace_products, kream_products_map)` — 가격·거래량 필터 전에 마켓 상품 모델번호와 Kream 상세 모델번호를 다시 완전 일치 비교한다. 가격 기준은 `effective_price(marketplace)`이며 `ArbitrageResult.marketplace_price = effective price`, `price_diff = kream_price - effective_price`
 
 ### kream/history_marker.py
 - `find_previous_result_path(output_dir)` — 오늘 폴더(`output_dir.name`) 이전의 `YYYYMMDD` 폴더 중 `arbitrage_results.json`이 실제 존재하는 가장 최신 파일 경로. 없으면 `None`

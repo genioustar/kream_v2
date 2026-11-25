@@ -430,7 +430,7 @@ resell-sniper/
 | `NIKE_SALE_URL` | `""` | 나이키 성인 세일 신발 URL. 빈 문자열이면 비활성, 크롤러는 `config.NIKE_SALE_URL` 을 직접 읽음. 예시: `https://www.nike.com/kr/w/clearance-shoes-3yaepzy7ok` |
 | `ADIDAS_SALE_URL` | `""` | 아디다스 세일 목록 URL. 빈 문자열이면 비활성, 크롤러는 `config.ADIDAS_SALE_URL` 을 직접 읽음. 예시: `https://www.adidas.co.kr/outlet?grid=true` (공식 아울렛 전체보기, grid=true 필수). 의류·신발·용품 포함, Kids 제외 |
 | `MUSINSA_SALE_URL` | musinsa.com/main/outlet/ranking?...categoryCode=107002 | 무신사 아울렛 신발 랭킹 URL. `/brand/{slug}` URL도 지원. `/campaign/...` URL이면 아래 두 상수로 Kream 브랜드 할인 모드 |
-| `MUSINSA_KREAM_BRANDS` | adidas, puma, vans, reebok, crocs, converse, camper, underarmour | 캠페인 모드에서 수집할 브랜드 slug 튜플. 과거 로그에서 Kream과 모델이 일치한 브랜드이며 순서대로 수집 |
+| `MUSINSA_KREAM_BRANDS` | adidas, puma, vans, reebok, crocs, converse, camper, underarmour, nike, ugg | 캠페인 모드에서 수집할 브랜드 slug 튜플. 과거 로그에서 Kream과 모델이 일치한 브랜드이며 순서대로 수집 |
 | `MUSINSA_MIN_DISCOUNT_RATE` | 30 | 캠페인 모드 할인율 하한(%). 이 값 이상만 수집하고 미만이 나오면 그 브랜드 수집을 멈춘다. 과거 차익 상품이 30% 이상이었다는 추정값 |
 | `MUSINSA_KREAM_CATEGORY` | 103 | 캠페인 모드 PLP API query `category`로 넘기는 무신사 신발 카테고리 코드. 과거 차익 7건이 모두 신발이고, 의류·양말까지 받으면 8개 브랜드 수집이 약 600개에서 3653개로 6배가 된다(2026-11-24 실측, 신발만 2282개·86초). `categoryCode`는 API가 무시한다 |
 | `SSFSHOP_SALE_URL` | ssfshop.com/ADIDAS-KOREA/main?...brandShopNo=BDMA29AKU | SSF SHOP ADIDAS KOREA 브랜드관 전체(의류·잡화·신발). 빈 문자열이면 비활성, 크롤러는 `config.SSFSHOP_SALE_URL`을 직접 읽음. `currentPage`는 1부터 덮어씀 |

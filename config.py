@@ -66,7 +66,7 @@ ADIDAS_SALE_URL = ""
 # 예시: https://brand.naver.com/adidas/shoppingstory/detail?id=5002700579
 SPECIAL_SALE_URL = ""
 SPECIAL_MODEL_STRATEGY = "auto"
-MUSINSA_SALE_URL = "https://www.musinsa.com/main/outlet/ranking?gf=A&storeCode=outlet&sectionId=233&contentsId=&categoryCode=107002&ageBand=AGE_BAND_ALL"
+MUSINSA_SALE_URL = "https://www.musinsa.com/campaign/mujinjangsale/recommended"
 # MUSINSA_SALE_URL 이 /campaign/ 으로 시작하면 이 브랜드만 수집한다. 과거 Kream 과 모델이 일치한 브랜드이며 사용자가 추가·삭제한다.
 MUSINSA_KREAM_BRANDS: tuple[str, ...] = ("adidas", "puma", "vans", "reebok", "crocs", "converse", "camper", "underarmour", "nike", "ugg")
 # 브랜드마다 할인율 내림차순으로 받다가 이 값(%) 미만이 나오면 멈춘다. 과거 차익 상품이 할인 30% 이상이었다는 추정이며 검증한 값이 아니다.
